@@ -1,35 +1,116 @@
-# Repository Guidelines
+# Agentic Trading Platform
 
-## Project Structure & Module Organization
+## Product Goal
 
-This repository is organized as a small full-stack workspace. The active app is in `frontend/`, a Next.js project using the App Router. Route files live under `frontend/app/`, global styles are in `frontend/app/globals.css`, and static assets are in `frontend/public/`. Frontend configuration is kept at the project root of `frontend/` (`next.config.ts`, `tsconfig.json`, `eslint.config.mjs`, `postcss.config.mjs`). The `backend/` directory currently exists but has no implementation files; add backend code there when server-side services are introduced.
+Build a web application that converts natural-language trading strategies into
+validated, deterministic backtests.
 
-For frontend changes, also read `frontend/AGENTS.md`; it notes that this Next.js version may differ from older conventions.
+The application is educational and research-oriented.
+It does not execute live trades or provide financial advice.
 
-## Build, Test, and Development Commands
+---
 
-Run frontend commands from `frontend/`:
+## Tech Stack
 
-- `npm install` installs dependencies from `package-lock.json`.
-- `npm run dev` starts the Next.js development server.
-- `npm run build` creates a production build.
-- `npm start` serves the production build after `npm run build`.
-- `npm run lint` runs ESLint with Next.js core web vitals and TypeScript rules.
+Frontend
+- Next.js (App Router)
+- TypeScript
+- Tailwind CSS
+- Auth.js
+- Recharts
 
-There are no root-level scripts yet. Add them only if they coordinate multiple packages.
+Backend
+- FastAPI
+- Python 3.12
+- SQLAlchemy 2
+- Alembic
+- PostgreSQL
+- Pydantic v2
 
-## Coding Style & Naming Conventions
+Deployment
+- Frontend: Vercel
+- Backend: Docker
+- Database: PostgreSQL
 
-Use TypeScript and React function components for frontend code. Follow the existing style: two-space indentation, double quotes, semicolons, and Tailwind utility classes for styling. Name React components in `PascalCase`, functions and variables in `camelCase`, and route directories in lowercase path-oriented names. Keep shared UI or utility code close to where it is used until reuse is clear.
+---
 
-## Testing Guidelines
+## Core Workflow
 
-No test framework is configured yet. When adding tests, colocate them with the code they cover or place broader integration tests in a clearly named `tests/` directory within the relevant package. Use names such as `component.test.tsx` or `service.test.ts`. Until tests exist, run `npm run lint` and `npm run build` before submitting frontend changes.
+1. User signs in with Google.
+2. User enters a natural-language strategy.
+3. LLM converts it into a constrained JSON schema.
+4. Backend validates the schema.
+5. User confirms assumptions.
+6. Deterministic backtesting engine runs.
+7. Performance metrics are calculated.
+8. LLM explains results.
+9. Strategy and results are saved.
 
-## Commit & Pull Request Guidelines
+---
 
-This repository has no existing commit history, so use concise imperative commit messages such as `Add dashboard shell` or `Configure linting`. Pull requests should include a short summary, testing performed, and screenshots for visible UI changes. Link related issues when available and call out configuration or environment changes explicitly.
+## Engineering Principles
 
-## Security & Configuration Tips
+Never execute model-generated Python.
 
-Do not commit secrets or local environment files. Prefer `.env.local` for machine-specific frontend settings and document required variables in README files or example env files.
+Never execute arbitrary code.
+
+Backtests must always be deterministic.
+
+Prevent look-ahead bias.
+
+Validate every strategy with Pydantic.
+
+Never silently assume missing parameters.
+
+Unknown indicators should return validation errors.
+
+Authentication must always be enforced server-side.
+
+Never trust a user_id sent from the frontend.
+
+Prefer small, composable modules.
+
+---
+
+## MVP Scope
+
+Supported:
+
+- SPY
+- Daily candles
+- SMA
+- EMA
+- RSI
+- Long-only
+- Transaction fees
+- Slippage
+- Stop loss
+- Take profit
+
+Not supported yet:
+
+- Options
+- Crypto
+- Intraday data
+- Live trading
+- Portfolio optimization
+
+---
+
+## Development Process
+
+Before implementing:
+
+1. Inspect the repository.
+2. Explain the implementation plan.
+3. Identify affected files.
+4. Wait for approval.
+
+After implementing:
+
+- Run lint
+- Run tests
+- Explain changes
+- Note remaining limitations
+
+Never claim tests passed unless they were actually run.
