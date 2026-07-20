@@ -16,21 +16,25 @@ Frontend
 - Next.js (App Router)
 - TypeScript
 - Tailwind CSS
-- Auth.js
 - Recharts
 
 Backend
 - FastAPI
 - Python 3.12
 - SQLAlchemy 2
-- Alembic
-- PostgreSQL
 - Pydantic v2
+- RQ
+- Redis
+
+Platform
+- Supabase Postgres
+- Supabase Auth (planned)
+- Supabase CLI migrations
 
 Deployment
 - Frontend: Vercel
 - Backend: Docker
-- Database: PostgreSQL
+- Database: Supabase Postgres
 
 ---
 

@@ -1,0 +1,9 @@
+# Supabase CLI state
+.branches/
+.temp/
+
+# Local environment files
+.env
+.env.keys
+.env.local
+.env.*.local
