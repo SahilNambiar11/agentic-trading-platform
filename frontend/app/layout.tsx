@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
 const geistSans = Geist({
+  // Next/font exposes CSS variables used by globals.css and the root element.
   variable: "--font-geist-sans",
   subsets: ["latin"],
 });
@@ -22,6 +23,7 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // RootLayout wraps every route in the App Router.
   return (
     <html
       lang="en"

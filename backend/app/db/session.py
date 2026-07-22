@@ -8,6 +8,12 @@ from app.core.config import get_settings
 
 
 def create_database_engine(database_url: str) -> Engine:
+    """Create the SQLAlchemy engine used to talk to Postgres.
+
+    Supabase/Postgres URLs commonly use the generic `postgresql://` scheme. This
+    function upgrades that to `postgresql+psycopg://` so SQLAlchemy uses the
+    psycopg v3 driver declared in `pyproject.toml`.
+    """
     url = make_url(database_url)
     if url.drivername == "postgresql":
         url = url.set(drivername="postgresql+psycopg")
@@ -19,5 +25,6 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 
 
 def get_db_session() -> Generator[Session]:
+    """FastAPI dependency that gives each request its own database session."""
     with SessionLocal() as session:
         yield session

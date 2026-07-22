@@ -10,14 +10,16 @@ from app.services.supabase_auth import (
     SupabaseAuthClient,
 )
 
-bearer_scheme = HTTPBearer(auto_error=False)   
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def get_supabase_auth_client(request: Request) -> SupabaseAuthClient:
+    """Read the shared Supabase auth client created during app startup."""
     return cast(SupabaseAuthClient, request.app.state.supabase_auth_client)
 
 
 def unauthorized_exception() -> HTTPException:
+    """Build the standard 401 response for missing or invalid bearer tokens."""
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or missing authentication credentials.",
@@ -29,6 +31,12 @@ async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     auth_client: Annotated[SupabaseAuthClient, Depends(get_supabase_auth_client)],
 ) -> AuthenticatedUser:
+    """Verify the request bearer token and expose the current authenticated user.
+
+    This dependency is the security boundary for protected API routes. Handlers
+    depend on `CurrentUser`, then use `current_user.id` instead of accepting a
+    `user_id` from the frontend.
+    """
     if credentials is None:
         raise unauthorized_exception()
 

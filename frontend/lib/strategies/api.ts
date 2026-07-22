@@ -9,20 +9,22 @@ import type {
 } from "./types";
 
 export class StrategyApiError extends Error {
-  constructor(
-    message: string,
-    public readonly status?: number,
-  ) {
+  // Custom error type lets React UI distinguish expected API failures from
+  // unknown JavaScript exceptions and show better user-facing messages.
+  constructor(message: string) {
     super(message);
     this.name = "StrategyApiError";
   }
 }
 
 function isStrategyJson(value: unknown): value is StrategyJson {
+  // Runtime guard for JSON object values returned by the backend.
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isStrategy(value: unknown): value is Strategy {
+  // Runtime guard for the backend response shape. This catches accidental API
+  // contract changes before invalid data reaches React components.
   if (!isStrategyJson(value)) {
     return false;
   }
@@ -38,6 +40,8 @@ function isStrategy(value: unknown): value is Strategy {
 }
 
 async function getAccessToken(): Promise<string> {
+  // FastAPI does not read Supabase cookies directly. The frontend pulls the
+  // current browser session token and sends it as an Authorization header.
   const supabase = createClient();
   const { data, error } = await supabase.auth.getSession();
 
@@ -46,13 +50,15 @@ async function getAccessToken(): Promise<string> {
   }
 
   if (!data.session?.access_token) {
-    throw new StrategyApiError("Your session has expired. Please sign in again.", 401);
+    throw new StrategyApiError("Your session has expired. Please sign in again.");
   }
 
   return data.session.access_token;
 }
 
 async function readErrorMessage(response: Response): Promise<string> {
+  // Prefer FastAPI's structured `detail` message, then fall back to safe generic
+  // copy so implementation details do not leak into the UI.
   try {
     const body: unknown = await response.json();
     if (isStrategyJson(body) && typeof body.detail === "string") {
@@ -74,6 +80,8 @@ async function readErrorMessage(response: Response): Promise<string> {
 }
 
 async function request(path: string, init: RequestInit = {}): Promise<Response> {
+  // Shared request wrapper for every strategy endpoint. This is the exact point
+  // where browser actions become authenticated FastAPI requests.
   const accessToken = await getAccessToken();
 
   let response: Response;
@@ -93,13 +101,14 @@ async function request(path: string, init: RequestInit = {}): Promise<Response> 
   }
 
   if (!response.ok) {
-    throw new StrategyApiError(await readErrorMessage(response), response.status);
+    throw new StrategyApiError(await readErrorMessage(response));
   }
 
   return response;
 }
 
 async function readStrategy(response: Response): Promise<Strategy> {
+  // Parse and validate endpoints that should return a single strategy object.
   let body: unknown;
 
   try {
@@ -116,6 +125,7 @@ async function readStrategy(response: Response): Promise<Strategy> {
 }
 
 export async function listStrategies(): Promise<Strategy[]> {
+  // Load all strategies visible to the authenticated user.
   const response = await request("/strategies");
 
   let body: unknown;
@@ -133,6 +143,7 @@ export async function listStrategies(): Promise<Strategy[]> {
 }
 
 export async function createStrategy(payload: CreateStrategyRequest): Promise<Strategy> {
+  // Save a new natural-language strategy draft.
   return readStrategy(
     await request("/strategies", {
       body: JSON.stringify(payload),
@@ -145,6 +156,7 @@ export async function updateStrategy(
   strategyId: string,
   payload: UpdateStrategyRequest,
 ): Promise<Strategy> {
+  // Patch only changed user-editable fields on a saved strategy.
   return readStrategy(
     await request(`/strategies/${strategyId}`, {
       body: JSON.stringify(payload),
@@ -154,5 +166,6 @@ export async function updateStrategy(
 }
 
 export async function deleteStrategy(strategyId: string): Promise<void> {
+  // Delete a saved strategy. A 204 response has no JSON body to parse.
   await request(`/strategies/${strategyId}`, { method: "DELETE" });
 }

@@ -7,6 +7,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Environment(StrEnum):
+    """Known deployment environments for configuration-sensitive behavior."""
+
     LOCAL = "local"
     TEST = "test"
     STAGING = "staging"
@@ -14,6 +16,13 @@ class Environment(StrEnum):
 
 
 class Settings(BaseSettings):
+    """Typed application configuration loaded from env vars and backend/.env.
+
+    Pydantic Settings validates these values at startup. That means a missing
+    database URL, Redis URL, Supabase URL/key, or malformed CORS origin fails
+    early instead of failing later inside a request handler.
+    """
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -34,4 +43,9 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
+    """Return the process-wide settings object.
+
+    The cache avoids reparsing `.env` and revalidating environment values every
+    time another module asks for configuration.
+    """
     return Settings()  # pyright: ignore[reportCallIssue]

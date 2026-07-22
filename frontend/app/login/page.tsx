@@ -7,11 +7,14 @@ import { FormEvent, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
+  // Login is client-side because the form talks directly to Supabase Auth from
+  // the browser and then navigates into the server-protected dashboard.
   const router = useRouter();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    // Convert the form submit into a Supabase email/password login request.
     event.preventDefault();
     setErrorMessage(null);
 

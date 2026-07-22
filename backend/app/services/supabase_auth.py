@@ -13,12 +13,21 @@ class AuthServiceUnavailableError(Exception):
 
 
 class SupabaseAuthClient:
+    """Small wrapper around Supabase Auth's `/auth/v1/user` endpoint.
+
+    The backend does not decode or trust JWTs locally yet. Instead, protected
+    routes send the browser's bearer token to Supabase Auth and use the verified
+    user response as the source of truth.
+    """
+
     def __init__(self, http_client: httpx.AsyncClient, supabase_url: str, api_key: str) -> None:
+        """Store the reusable HTTP client and Supabase project credentials."""
         self._http_client = http_client
         self._user_url = f"{supabase_url.rstrip('/')}/auth/v1/user"
         self._api_key = api_key
 
     async def get_user(self, access_token: str) -> AuthenticatedUser:
+        """Verify an access token and return the authenticated Supabase user."""
         try:
             response = await self._http_client.get(
                 self._user_url,

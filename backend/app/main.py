@@ -12,6 +12,13 @@ from app.services.supabase_auth import SupabaseAuthClient
 
 
 def create_lifespan(settings: Settings):
+    """Create startup/shutdown wiring for shared app resources.
+
+    FastAPI runs this lifespan context once for the whole application. The
+    Supabase auth client is stored on `application.state` so route dependencies
+    can reuse one configured HTTP client instead of rebuilding it per request.
+    """
+
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncGenerator[None]:
         async with httpx.AsyncClient(timeout=settings.supabase_auth_timeout_seconds) as http_client:
@@ -26,6 +33,12 @@ def create_lifespan(settings: Settings):
 
 
 def create_app() -> FastAPI:
+    """Build and configure the FastAPI application.
+
+    This is the backend entrypoint used by Uvicorn. It loads environment-backed
+    settings, configures JSON logging, allows the frontend origin through CORS,
+    and mounts the route modules collected in `app.api.router`.
+    """
     settings = get_settings()
     configure_logging(settings.log_level)
 

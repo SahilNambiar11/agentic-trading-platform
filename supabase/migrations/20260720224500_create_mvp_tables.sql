@@ -1,5 +1,7 @@
 begin;
 
+-- Backtest runs move through this lifecycle once the worker/backtesting engine
+-- is implemented. The enum keeps status values consistent across the app.
 create type public.backtest_status as enum (
   'queued',
   'running',
@@ -8,6 +10,8 @@ create type public.backtest_status as enum (
   'cancelled'
 );
 
+-- One profile row per Supabase Auth user. Auth itself owns `auth.users`; this
+-- public table is where application-specific user fields can live.
 create table public.profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   display_name text,
@@ -18,6 +22,8 @@ create table public.profiles (
     check (display_name is null or char_length(display_name) between 1 and 100)
 );
 
+-- Saved strategy drafts. `source_text` stores the user's plain-English idea;
+-- `strategy_json` will store the constrained parsed representation later.
 create table public.strategies (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid()
@@ -35,6 +41,8 @@ create table public.strategies (
   constraint strategies_id_user_id_key unique (id, user_id)
 );
 
+-- Historical executions of a strategy. The current backend does not expose this
+-- table yet, but the MVP schema is ready for queued/completed backtests.
 create table public.backtest_runs (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid()
@@ -55,6 +63,8 @@ create table public.backtest_runs (
     on delete cascade
 );
 
+-- Daily OHLCV candle storage. MVP scope is SPY daily candles, but the table
+-- allows other uppercase symbols while constraining interval to '1d'.
 create table public.market_data (
   symbol text not null,
   "interval" text not null,
@@ -93,6 +103,7 @@ create table public.market_data (
   constraint market_data_volume_check check (volume >= 0)
 );
 
+-- Indexes support common owner lookups and market-data time-series scans.
 create index strategies_user_id_idx on public.strategies (user_id);
 
 create index backtest_runs_user_id_idx on public.backtest_runs (user_id);
@@ -102,6 +113,7 @@ create index backtest_runs_strategy_id_idx on public.backtest_runs (strategy_id)
 create index market_data_symbol_timestamp_idx
   on public.market_data (symbol, "timestamp");
 
+-- Shared trigger function that keeps `updated_at` accurate on row updates.
 create function public.set_updated_at()
 returns trigger
 language plpgsql
@@ -132,16 +144,20 @@ create trigger market_data_set_updated_at
 before update on public.market_data
 for each row execute function public.set_updated_at();
 
+-- Row level security adds a database-level safety net around owner-scoped data.
 alter table public.profiles enable row level security;
 alter table public.strategies enable row level security;
 alter table public.backtest_runs enable row level security;
 alter table public.market_data enable row level security;
 
+-- Anonymous users cannot directly read or modify app tables.
 revoke all on public.profiles from anon;
 revoke all on public.strategies from anon;
 revoke all on public.backtest_runs from anon;
 revoke all on public.market_data from anon;
 
+-- Authenticated users may manage their own app data. Market data is readable to
+-- users but only service_role can write it.
 grant select, insert, update, delete
   on public.profiles, public.strategies, public.backtest_runs
   to authenticated;
@@ -150,6 +166,8 @@ revoke all on public.market_data from authenticated;
 grant select on public.market_data to authenticated;
 grant select, insert, update, delete on public.market_data to service_role;
 
+-- Owner policies make Supabase/Postgres enforce the same user boundary the
+-- FastAPI routes enforce in application code.
 create policy profiles_owner_access
 on public.profiles
 for all

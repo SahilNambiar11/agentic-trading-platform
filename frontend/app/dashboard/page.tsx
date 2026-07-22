@@ -6,6 +6,8 @@ import { LogoutButton } from "./logout-button";
 import { StrategyWorkspace } from "./strategy-workspace";
 
 export default async function DashboardPage() {
+  // This server component protects the dashboard before any client-side React
+  // code runs. If Supabase cannot verify a user from cookies, redirect to login.
   const supabase = await createClient();
   const {
     data: { user },

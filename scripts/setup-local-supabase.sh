@@ -15,11 +15,14 @@ readonly FRONTEND_EXAMPLE="$REPO_ROOT/frontend/.env.example"
 readonly STATUS_FILE="$(mktemp "${TMPDIR:-/tmp}/supabase-status.XXXXXX")"
 
 cleanup() {
+  # The status file contains local Supabase credentials, so remove it as soon as
+  # the script exits.
   rm -f -- "$STATUS_FILE"
 }
 trap cleanup EXIT
 
 require_command() {
+  # Fail early with a clear message if the Supabase CLI is not installed.
   if ! command -v "$1" >/dev/null 2>&1; then
     printf 'Missing required command: %s\n' "$1" >&2
     exit 1
@@ -27,6 +30,8 @@ require_command() {
 }
 
 status_value() {
+  # Read one KEY=value entry from `supabase status --output env` without printing
+  # the full credential set to the terminal.
   local key="$1"
   local value
 
@@ -41,6 +46,8 @@ status_value() {
 }
 
 write_environment_file() {
+  # Rewrite an env file while preserving settings this script does not own. That
+  # lets developers keep local app/logging/CORS values across Supabase refreshes.
   local destination="$1"
   local fallback="$2"
   shift 2
@@ -70,6 +77,7 @@ write_environment_file() {
 }
 
 append_setting() {
+  # Append a single KEY=value pair after the old managed keys were stripped.
   local destination="$1"
   local key="$2"
   local value="$3"
@@ -80,11 +88,14 @@ append_setting() {
 require_command supabase
 
 cd "$REPO_ROOT"
+# Start the single local Supabase project used by both frontend and backend.
 if ! supabase start >/dev/null 2>&1; then
   printf 'Unable to start the local Supabase project. Check Docker and the Supabase CLI, then retry.\n' >&2
   exit 1
 fi
 
+# Read local API/database URLs and anon key into a temporary file. The script
+# then copies only the required values into ignored app env files.
 if ! supabase status --output env > "$STATUS_FILE" 2>/dev/null; then
   printf 'Unable to read local Supabase configuration.\n' >&2
   exit 1
@@ -93,6 +104,8 @@ fi
 readonly API_URL="$(status_value API_URL)"
 readonly ANON_KEY="$(status_value ANON_KEY)"
 readonly DB_URL="$(status_value DB_URL)"
+# Containers cannot reach the host's 127.0.0.1, so Docker-specific env values
+# replace localhost with Docker's host gateway name.
 DOCKER_DB_URL="${DB_URL/127.0.0.1/host.docker.internal}"
 DOCKER_API_URL="${API_URL/127.0.0.1/host.docker.internal}"
 

@@ -16,6 +16,7 @@ DatabaseSession = Annotated[Session, Depends(get_db_session)]
 
 
 def get_owned_strategy(session: Session, strategy_id: UUID, user_id: UUID) -> Strategy:
+    """Fetch one strategy only if it belongs to the authenticated user."""
     try:
         strategy = session.scalar(
             select(Strategy).where(
@@ -36,6 +37,7 @@ def get_owned_strategy(session: Session, strategy_id: UUID, user_id: UUID) -> St
 
 
 def database_error() -> HTTPException:
+    """Hide internal database details behind a stable API error message."""
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="Unable to complete the strategy database operation.",
@@ -43,6 +45,7 @@ def database_error() -> HTTPException:
 
 
 def commit_and_refresh(session: Session, strategy: Strategy) -> None:
+    """Commit a strategy change and reload database-generated fields."""
     try:
         session.commit()
         session.refresh(strategy)
@@ -63,6 +66,7 @@ def create_strategy(
     current_user: CurrentUser,
     session: DatabaseSession,
 ) -> Strategy:
+    """Create a strategy owned by the verified Supabase user."""
     strategy = Strategy(
         user_id=current_user.id,
         name=payload.name,
@@ -76,6 +80,7 @@ def create_strategy(
 
 @router.get("", response_model=list[StrategyResponse])
 def list_strategies(current_user: CurrentUser, session: DatabaseSession) -> list[Strategy]:
+    """Return only the current user's strategies, newest first."""
     try:
         strategies = session.scalars(
             select(Strategy)
@@ -94,6 +99,7 @@ def get_strategy(
     current_user: CurrentUser,
     session: DatabaseSession,
 ) -> Strategy:
+    """Return one current-user-owned strategy or 404 if missing/not owned."""
     return get_owned_strategy(session, strategy_id, current_user.id)
 
 
@@ -104,6 +110,7 @@ def update_strategy(
     current_user: CurrentUser,
     session: DatabaseSession,
 ) -> Strategy:
+    """Apply partial edits to a current-user-owned strategy."""
     strategy = get_owned_strategy(session, strategy_id, current_user.id)
     updates: dict[str, Any] = payload.model_dump(exclude_unset=True)
     for field_name, value in updates.items():
@@ -119,6 +126,7 @@ def delete_strategy(
     current_user: CurrentUser,
     session: DatabaseSession,
 ) -> Response:
+    """Delete a current-user-owned strategy."""
     strategy = get_owned_strategy(session, strategy_id, current_user.id)
     try:
         session.delete(strategy)

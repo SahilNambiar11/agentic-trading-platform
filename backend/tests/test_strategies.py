@@ -23,6 +23,7 @@ USER_TWO_ID = UUID("6676e143-4796-4338-b42f-47f85e587e5f")
 
 
 def authenticated_user(user_id: UUID) -> AuthenticatedUser:
+    """Build a fake verified user for route tests."""
     return AuthenticatedUser(
         id=user_id,
         email=f"{user_id}@example.com",
@@ -31,11 +32,13 @@ def authenticated_user(user_id: UUID) -> AuthenticatedUser:
 
 
 def authenticate_as(user_id: UUID) -> None:
+    """Override backend auth so tests can switch between fake users."""
     app.dependency_overrides[get_current_user] = lambda: authenticated_user(user_id)
 
 
 @pytest.fixture
 def db_session() -> Generator[Session]:
+    """Provide an in-memory database shaped like the strategies migration."""
     engine = create_engine(
         "sqlite+pysqlite://",
         connect_args={"check_same_thread": False},
@@ -71,6 +74,8 @@ def db_session() -> Generator[Session]:
 
 @pytest.fixture
 def client(db_session: Session) -> Generator[TestClient]:
+    """Create a FastAPI TestClient wired to the in-memory DB and fake auth."""
+
     def override_db_session() -> Generator[Session]:
         yield db_session
 
@@ -91,6 +96,7 @@ def create_strategy(
     source_text: str = "Buy when the short SMA crosses above the long SMA.",
     strategy_json: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Helper used by tests that need an existing saved strategy."""
     response = client.post(
         "/strategies",
         json={
@@ -104,6 +110,7 @@ def create_strategy(
 
 
 def test_strategy_model_matches_migration_metadata() -> None:
+    """Keep the SQLAlchemy Strategy model aligned with the SQL migration."""
     table = cast(Table, Strategy.__table__)
 
     assert table.schema == "public"

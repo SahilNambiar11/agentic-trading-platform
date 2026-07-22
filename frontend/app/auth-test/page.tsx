@@ -10,6 +10,8 @@ type ConnectionState =
   | { status: "error" };
 
 export default function AuthTestPage() {
+  // Small diagnostics page for checking whether the browser can create a
+  // Supabase client and read the current session.
   const [connection, setConnection] = useState<ConnectionState>({
     status: "checking",
   });
@@ -18,6 +20,7 @@ export default function AuthTestPage() {
     let active = true;
 
     async function checkSession() {
+      // This does not call FastAPI; it only verifies the frontend/Supabase link.
       try {
         const supabase = createClient();
         const { data, error } = await supabase.auth.getSession();

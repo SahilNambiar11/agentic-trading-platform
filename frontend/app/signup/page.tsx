@@ -7,11 +7,14 @@ import { FormEvent, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 export default function SignupPage() {
+  // Signup mirrors login, but creates a new Supabase Auth user before routing to
+  // the dashboard.
   const router = useRouter();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    // Do lightweight client validation before asking Supabase to create a user.
     event.preventDefault();
     setErrorMessage(null);
 

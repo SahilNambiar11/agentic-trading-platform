@@ -6,11 +6,15 @@ import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 export function LogoutButton() {
+  // Client component because signing out calls the browser Supabase client and
+  // then navigates the user away from the protected dashboard.
   const router = useRouter();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSigningOut, setIsSigningOut] = useState(false);
 
   async function handleLogout() {
+    // Clear the Supabase session, then refresh server components so protected
+    // routes see the user as logged out.
     setErrorMessage(null);
     setIsSigningOut(true);
 

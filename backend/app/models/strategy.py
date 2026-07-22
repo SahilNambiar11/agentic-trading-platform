@@ -34,6 +34,13 @@ auth_users_table = Table(
 
 
 class Strategy(Base):
+    """SQLAlchemy ORM mapping for `public.strategies`.
+
+    A Strategy stores the user's original natural-language idea plus optional
+    parsed JSON. The parsed JSON is nullable because the current app can save a
+    draft strategy before LLM parsing/backtesting exists.
+    """
+
     __tablename__ = "strategies"
     __table_args__ = (
         CheckConstraint(
