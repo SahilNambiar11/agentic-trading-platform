@@ -16,16 +16,9 @@ services:
     build:
       context: ./backend
     env_file:
-      - ./backend/.env
+      - ./backend/.env.docker
     environment:
-      APP_NAME: Agentic Trading Platform API
-      ENVIRONMENT: local
-      LOG_LEVEL: INFO
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@host.docker.internal:54322/postgres}
       REDIS_URL: redis://redis:6379/0
-      SUPABASE_URL: http://host.docker.internal:54321
-      SUPABASE_AUTH_TIMEOUT_SECONDS: 5
-      CORS_ORIGINS: '["http://localhost:3000","http://127.0.0.1:3000"]'
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -49,10 +42,9 @@ services:
     build:
       context: ./backend
     command: ["rq", "worker", "--url", "redis://redis:6379/0", "default"]
+    env_file:
+      - ./backend/.env.docker
     environment:
-      ENVIRONMENT: local
-      LOG_LEVEL: INFO
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@host.docker.internal:54322/postgres}
       REDIS_URL: redis://redis:6379/0
     extra_hosts:
       - "host.docker.internal:host-gateway"

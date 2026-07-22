@@ -10,27 +10,32 @@ FastAPI backend foundation for the Agentic Trading Platform.
 
 ## Local setup
 
-From `backend/`:
+From the repository root, start local Supabase and generate the ignored local
+configuration files:
+
+```bash
+./scripts/setup-local-supabase.sh
+```
+
+The script preserves every existing non-Supabase, non-database setting in
+`backend/.env` (including application, logging, CORS, and Redis settings). It
+updates only `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and
+`SUPABASE_AUTH_TIMEOUT_SECONDS`. It also creates a Docker-specific backend
+environment file with the same Supabase project addressed through Docker's host
+gateway.
+
+Then, from `backend/`:
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
-cp .env.example .env
 ```
 
-Initialize Supabase once from the repository root if `supabase/config.toml` does
-not exist, then start the local Supabase stack:
-
-```bash
-supabase init
-supabase start
-```
-
-The example `DATABASE_URL` connects directly from the host to Supabase Postgres
-on `127.0.0.1:54322`. Use the database URL reported by `supabase status` if the
-local ports have been customized.
+The generated `DATABASE_URL` connects directly from the host to the local
+Supabase Postgres instance. The setup script uses the ports reported by the
+Supabase CLI, so it also supports customized local ports.
 
 Start the API directly from `backend/`:
 
@@ -49,7 +54,9 @@ root:
 docker compose up --build
 ```
 
-Containers use `host.docker.internal` to reach Supabase Postgres on the host.
+Run `./scripts/setup-local-supabase.sh` before starting Compose. Containers use
+the generated Docker-specific configuration to reach the same Supabase project
+through `host.docker.internal`.
 The worker listens to the `default` queue and remains idle until jobs are added
 in a future implementation.
 
