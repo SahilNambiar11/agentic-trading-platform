@@ -3,21 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 import { LogoutButton } from "./logout-button";
-
-const dashboardSections = [
-  {
-    title: "New Strategy",
-    description: "Create a strategy from your trading idea.",
-  },
-  {
-    title: "My Strategies",
-    description: "Your saved strategies will appear here.",
-  },
-  {
-    title: "Recent Backtests",
-    description: "Completed and in-progress backtests will appear here.",
-  },
-];
+import { StrategyWorkspace } from "./strategy-workspace";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
@@ -54,18 +40,14 @@ export default async function DashboardPage() {
           </p>
         </div>
 
-        <div className="grid gap-5 md:grid-cols-3">
-          {dashboardSections.map((section) => (
-            <section
-              className="min-h-48 rounded-md border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
-              key={section.title}
-            >
-              <h2 className="text-lg font-semibold">{section.title}</h2>
-              <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                {section.description}
-              </p>
-            </section>
-          ))}
+        <div className="grid gap-5 lg:grid-cols-3">
+          <StrategyWorkspace />
+          <section className="min-h-48 rounded-md border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 lg:col-span-3">
+            <h2 className="text-lg font-semibold">Recent Backtests</h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+              Completed and in-progress backtests will appear here.
+            </p>
+          </section>
         </div>
       </div>
     </main>
