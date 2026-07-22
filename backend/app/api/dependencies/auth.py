@@ -10,7 +10,7 @@ from app.services.supabase_auth import (
     SupabaseAuthClient,
 )
 
-bearer_scheme = HTTPBearer(auto_error=False)
+bearer_scheme = HTTPBearer(auto_error=False)   
 
 
 def get_supabase_auth_client(request: Request) -> SupabaseAuthClient:
