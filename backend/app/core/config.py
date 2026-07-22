@@ -2,7 +2,7 @@ from enum import StrEnum
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import PostgresDsn, RedisDsn
+from pydantic import AnyHttpUrl, PostgresDsn, RedisDsn, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     database_url: PostgresDsn
     redis_url: RedisDsn
+    supabase_url: AnyHttpUrl
+    supabase_anon_key: SecretStr
+    supabase_auth_timeout_seconds: float = 5.0
+    cors_origins: list[AnyHttpUrl]
 
 
 @lru_cache

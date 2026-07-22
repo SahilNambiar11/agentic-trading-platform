@@ -59,9 +59,35 @@ Configuration is loaded from environment variables. For local development,
 Pydantic Settings also reads `backend/.env`. See `.env.example` for all required
 values. The example contains local-only credentials used by Supabase CLI.
 
+`SUPABASE_URL` must be the base API URL reported by `supabase status`, without a
+service path such as `/auth/v1` or `/rest/v1`. Set `SUPABASE_ANON_KEY` to the
+matching local anonymous key. `CORS_ORIGINS` is a JSON array of frontend origins
+allowed to call the API.
+
 For hosted environments, provide `DATABASE_URL` through the deployment secret
 manager using the Supabase direct or session-pooler connection string. Never
 commit hosted database credentials, service-role keys, or access tokens.
+
+## Authentication
+
+Protected endpoints expect the Supabase user access token as a bearer token:
+
+```http
+Authorization: Bearer <access-token>
+```
+
+The backend verifies the token with the configured Supabase Auth server and
+derives the user ID from the verified response. It never trusts a `user_id`
+provided by a browser request.
+
+Use `GET /auth/me` to verify the integration. It returns the authenticated
+user's ID, email, and role. Missing or invalid credentials return `401`; an
+unreachable Supabase Auth service returns `503`. The `/health` endpoint remains
+public.
+
+Browser code should obtain the current access token from the existing Supabase
+session and attach it to FastAPI requests. FastAPI does not consume the Next.js
+session cookies directly.
 
 ## Quality checks
 
