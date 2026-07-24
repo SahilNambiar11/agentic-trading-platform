@@ -3,16 +3,18 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import {
-  createStrategy,
   deleteStrategy,
   listStrategies,
   StrategyApiError,
+  previewStrategy,
+  saveConfirmedStrategy,
   updateStrategy,
 } from "@/lib/strategies/api";
-import type { Strategy, UpdateStrategyRequest } from "@/lib/strategies/types";
+import type { Strategy, StrategyPreview, UpdateStrategyRequest } from "@/lib/strategies/types";
 
 import { StrategyCreateForm } from "./strategy-create-form";
 import { StrategyListItem, type StrategyItemMode } from "./strategy-list-item";
+import { StrategyReview } from "./strategy-review";
 import { validateStrategyInput } from "./strategy-validation";
 
 type Notice = { tone: "error" | "success"; message: string } | null;
@@ -32,7 +34,12 @@ export function StrategyWorkspace() {
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const [isSavingPreview, setIsSavingPreview] = useState(false);
+  const [preview, setPreview] = useState<StrategyPreview | null>(null);
+  const [pendingName, setPendingName] = useState("");
+  const [pendingSourceText, setPendingSourceText] = useState("");
+  const [previewConfirmed, setPreviewConfirmed] = useState(false);
   const [isMutating, setIsMutating] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const [activeAction, setActiveAction] = useState<ActiveStrategyAction>(null);
@@ -99,32 +106,60 @@ export function StrategyWorkspace() {
     setNotice(null);
   }
 
-  async function handleCreate(name: string, sourceText: string): Promise<boolean> {
+  async function handlePreview(name: string, sourceText: string): Promise<void> {
     // Validate locally first for quick feedback, then persist through FastAPI.
     // Returning true tells the child form it can clear its fields.
     const result = validateStrategyInput(name, sourceText);
     if (!result.valid) {
       setNotice({ tone: "error", message: result.error });
-      return false;
+      return;
     }
 
-    setIsCreating(true);
+    setIsPreviewing(true);
     setNotice(null);
 
     try {
-      await createStrategy({
-        name: result.value.name,
-        source_text: result.value.sourceText,
-        strategy_json: null,
-      });
-      await loadStrategies();
-      setNotice({ tone: "success", message: "Strategy created." });
-      return true;
+      const nextPreview = await previewStrategy(result.value.sourceText);
+      setPendingName(result.value.name);
+      setPendingSourceText(result.value.sourceText);
+      setPreview(nextPreview);
+      setPreviewConfirmed(false);
     } catch (error) {
       setNotice({ tone: "error", message: getErrorMessage(error) });
-      return false;
     } finally {
-      setIsCreating(false);
+      setIsPreviewing(false);
+    }
+  }
+
+  function invalidatePreview() {
+    if (preview) {
+      setPreview(null);
+      setPreviewConfirmed(false);
+    }
+  }
+
+  async function handleSavePreview() {
+    if (!preview) return;
+    setIsSavingPreview(true);
+    setNotice(null);
+    try {
+      await saveConfirmedStrategy({
+        name: pendingName,
+        source_text: pendingSourceText,
+        specification: preview.parsed_strategy.specification,
+        defaults_applied: preview.parsed_strategy.defaults_applied,
+        assumptions: preview.parsed_strategy.assumptions,
+        requires_confirmation: preview.parsed_strategy.requires_confirmation,
+        confirmed: true,
+      });
+      setPreview(null);
+      setPreviewConfirmed(false);
+      await loadStrategies();
+      setNotice({ tone: "success", message: "Confirmed strategy saved." });
+    } catch (error) {
+      setNotice({ tone: "error", message: getErrorMessage(error) });
+    } finally {
+      setIsSavingPreview(false);
     }
   }
 
@@ -185,7 +220,19 @@ export function StrategyWorkspace() {
 
   return (
     <>
-      <StrategyCreateForm isSubmitting={isCreating} onSubmit={handleCreate} />
+      <StrategyCreateForm isPreviewing={isPreviewing} onDraftChange={invalidatePreview} onPreview={handlePreview} />
+
+      {preview && (
+        <StrategyReview
+          confirmed={previewConfirmed}
+          isSaving={isSavingPreview}
+          onCancel={() => { setPreview(null); setPreviewConfirmed(false); }}
+          onConfirmationChange={setPreviewConfirmed}
+          onEditPrompt={() => { setPreview(null); setPreviewConfirmed(false); }}
+          onSave={() => void handleSavePreview()}
+          preview={preview}
+        />
+      )}
 
       <section className="rounded-md border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 lg:col-span-2">
         <div className="flex flex-wrap items-start justify-between gap-3">

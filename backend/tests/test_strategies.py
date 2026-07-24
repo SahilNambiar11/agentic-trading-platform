@@ -1,5 +1,7 @@
 from collections.abc import Generator
 from datetime import UTC, datetime
+from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any, cast
 from uuid import UUID, uuid4
 
@@ -13,10 +15,15 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.schema import DefaultClause
 
 from app.api.dependencies.auth import get_current_user
+from app.api.routes import strategies as strategy_routes
+from app.api.routes.strategies import get_strategy_parser
+from app.backtesting.models import BacktestMetrics, ExecutionResult
 from app.db.session import get_db_session
 from app.main import app
 from app.models.strategy import Strategy
 from app.schemas.auth import AuthenticatedUser
+from app.schemas.strategy_spec import ParsedStrategyResult
+from app.services.strategy_parser import StrategyProviderError
 
 USER_ONE_ID = UUID("4b53cd47-e66e-47fb-b1a3-589dbf0eab76")
 USER_TWO_ID = UUID("6676e143-4796-4338-b42f-47f85e587e5f")
@@ -373,3 +380,146 @@ def test_delete_returns_not_found_for_missing_strategy(client: TestClient) -> No
     response = client.delete(f"/strategies/{uuid4()}")
 
     assert response.status_code == 404
+
+
+def preview_result(*, assumptions: bool = False) -> ParsedStrategyResult:
+    result = ParsedStrategyResult.model_validate(
+        {
+            "specification": {
+                "symbol": "SPY",
+                "interval": "1d",
+                "entry": {
+                    "left": {"type": "indicator", "name": "sma", "source": "close", "period": 50},
+                    "operator": "crosses_above",
+                    "right": {"type": "indicator", "name": "sma", "source": "close", "period": 200},
+                },
+                "exit": {
+                    "left": {"type": "indicator", "name": "sma", "source": "close", "period": 50},
+                    "operator": "crosses_below",
+                    "right": {"type": "indicator", "name": "sma", "source": "close", "period": 200},
+                },
+                "execution": {
+                    "direction": "long",
+                    "position_size_percent": 100,
+                    "signal_execution": "next_bar_open",
+                },
+            },
+            "defaults_applied": [],
+            "assumptions": [],
+            "requires_confirmation": False,
+            "original_text": "Buy SPY.",
+        }
+    )
+    if not assumptions:
+        return result
+    return result.model_copy(
+        update={
+            "assumptions": [
+                {
+                    "field": "exit",
+                    "inferred_value": "x",
+                    "reason": "Inferred exit.",
+                    "confidence": "high",
+                    "requires_confirmation": True,
+                }
+            ],
+            "requires_confirmation": True,
+        }
+    )
+
+
+class MockParser:
+    def __init__(self, result: ParsedStrategyResult | Exception) -> None:
+        self.result, self.calls = result, 0
+
+    def parse(self, strategy_text: str) -> ParsedStrategyResult:
+        self.calls += 1
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
+def fake_preview() -> SimpleNamespace:
+    now = datetime(2024, 1, 1, tzinfo=UTC)
+    return SimpleNamespace(
+        interpretation="Interpreted strategy.",
+        execution=ExecutionResult(Decimal("10000"), Decimal("0"), [], [], []),
+        metrics=BacktestMetrics(
+            Decimal("0"),
+            Decimal("0"),
+            now,
+            Decimal("1"),
+            Decimal("1"),
+            Decimal("0"),
+            Decimal("0"),
+            Decimal("0"),
+        ),
+        bar_count=1,
+        start_timestamp=now,
+        end_timestamp=now,
+    )
+
+
+def test_preview_endpoint_is_authenticated_safe_and_non_persistent(
+    client: TestClient, db_session: Session, monkeypatch
+) -> None:
+    parser = MockParser(preview_result(assumptions=True))
+    app.dependency_overrides[get_strategy_parser] = lambda: parser
+    monkeypatch.setattr(strategy_routes, "create_preview", lambda session, parsed: fake_preview())
+    try:
+        response = client.post("/strategies/preview", json={"text": "Buy SPY."})
+        assert response.status_code == 200
+        assert response.json()["parsed_strategy"]["requires_confirmation"] is True
+        assert response.json()["backtest"]["ending_value"] == "10000"
+        assert db_session.scalars(select(Strategy)).all() == []
+        assert "raw_provider_response" not in response.json()
+    finally:
+        app.dependency_overrides.pop(get_strategy_parser, None)
+
+
+def test_preview_endpoint_maps_provider_failure_safely(client: TestClient) -> None:
+    app.dependency_overrides[get_strategy_parser] = lambda: MockParser(
+        StrategyProviderError("secret")
+    )
+    try:
+        response = client.post("/strategies/preview", json={"text": "Buy SPY."})
+        assert response.status_code == 502 and "secret" not in response.json()["detail"]
+    finally:
+        app.dependency_overrides.pop(get_strategy_parser, None)
+
+
+def test_confirmed_endpoint_validates_and_persists_bounded_metadata(
+    client: TestClient, db_session: Session
+) -> None:
+    parsed = preview_result()
+    payload = {
+        "name": "Confirmed",
+        "source_text": parsed.original_text,
+        "specification": parsed.specification.model_dump(mode="json"),
+        "defaults_applied": [],
+        "assumptions": [],
+        "requires_confirmation": False,
+        "confirmed": True,
+    }
+    response = client.post("/strategies/confirmed", json=payload)
+    assert response.status_code == 201
+    row = db_session.scalar(select(Strategy).where(Strategy.name == "Confirmed"))
+    assert row is not None and row.user_id == USER_ONE_ID and row.strategy_json is not None
+    assert set(row.strategy_json) == {
+        "specification",
+        "defaults_applied",
+        "assumptions",
+        "requires_confirmation",
+        "confirmed",
+        "parser_version",
+        "interpretation",
+    }
+    assert "backtest" not in row.strategy_json
+    payload["confirmed"] = False
+    assert client.post("/strategies/confirmed", json=payload).status_code == 422
+    payload["confirmed"] = True
+    payload["specification"]["symbol"] = "AAPL"
+    assert client.post("/strategies/confirmed", json=payload).status_code == 422
+    payload["specification"] = parsed.specification.model_dump(mode="json")
+    payload["unexpected"] = True
+    assert client.post("/strategies/confirmed", json=payload).status_code == 422

@@ -9,8 +9,11 @@ from app.backtesting.engine import execute_long_only_signals
 from app.backtesting.market_data import load_market_bars
 from app.backtesting.metrics import calculate_metrics
 from app.backtesting.models import BacktestResult, CompletedTrade
-from app.backtesting.sma_crossover import generate_sma_crossover_signals
+from app.backtesting.strategy_compiler import compile_strategy
 from app.db.session import SessionLocal
+from app.schemas.strategy_spec import (
+    StrategySpecification,
+)
 
 
 def run_sma_backtest(
@@ -32,11 +35,49 @@ def run_sma_backtest(
     if len(bars) <= long_window:
         raise ValueError("not enough bars to calculate both SMAs and execute a next-day signal")
 
-    signals = generate_sma_crossover_signals(
-        bars,
-        short_window=short_window,
-        long_window=long_window,
+    specification = StrategySpecification.model_validate(
+        {
+            "symbol": symbol,
+            "interval": interval,
+            "entry": {
+                "left": {
+                    "type": "indicator",
+                    "name": "sma",
+                    "source": "close",
+                    "period": short_window,
+                },
+                "operator": "crosses_above",
+                "right": {
+                    "type": "indicator",
+                    "name": "sma",
+                    "source": "close",
+                    "period": long_window,
+                },
+            },
+            "exit": {
+                "left": {
+                    "type": "indicator",
+                    "name": "sma",
+                    "source": "close",
+                    "period": short_window,
+                },
+                "operator": "crosses_below",
+                "right": {
+                    "type": "indicator",
+                    "name": "sma",
+                    "source": "close",
+                    "period": long_window,
+                },
+            },
+            "execution": {
+                "direction": "long",
+                "position_size_percent": 100,
+                "signal_execution": "next_bar_open",
+            },
+        }
     )
+    compiled = compile_strategy(specification)
+    signals = compiled.generate_signals(bars)
     execution = execute_long_only_signals(bars, signals, starting_cash=starting_cash)
     first_sma_timestamp = bars[long_window - 1].timestamp
     metrics = calculate_metrics(
@@ -45,7 +86,7 @@ def run_sma_backtest(
         completed_trades=execution.completed_trades,
         starting_cash=starting_cash,
         final_portfolio_value=execution.final_portfolio_value,
-        buy_and_hold_start_index=long_window,
+        buy_and_hold_start_index=compiled.first_signal_eligible_index(bars),
     )
     return BacktestResult(
         symbol=symbol,

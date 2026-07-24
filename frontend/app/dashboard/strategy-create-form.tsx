@@ -3,11 +3,12 @@
 import { FormEvent, useState } from "react";
 
 type StrategyCreateFormProps = {
-  isSubmitting: boolean;
-  onSubmit: (name: string, sourceText: string) => Promise<boolean>;
+  isPreviewing: boolean;
+  onPreview: (name: string, sourceText: string) => Promise<void>;
+  onDraftChange: () => void;
 };
 
-export function StrategyCreateForm({ isSubmitting, onSubmit }: StrategyCreateFormProps) {
+export function StrategyCreateForm({ isPreviewing, onPreview, onDraftChange }: StrategyCreateFormProps) {
   // This component owns only the form fields. The parent workspace owns the
   // actual API request so loading/error state stays coordinated with the list.
   const [name, setName] = useState("");
@@ -25,9 +26,7 @@ export function StrategyCreateForm({ isSubmitting, onSubmit }: StrategyCreateFor
     // create flow supplied by the parent component.
     event.preventDefault();
 
-    if (await onSubmit(name, sourceText)) {
-      resetForm();
-    }
+    await onPreview(name, sourceText);
   }
 
   return (
@@ -45,10 +44,10 @@ export function StrategyCreateForm({ isSubmitting, onSubmit }: StrategyCreateFor
           </label>
           <input
             className="mt-2 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20 dark:border-zinc-700 dark:bg-zinc-950"
-            disabled={isSubmitting}
+            disabled={isPreviewing}
             id="strategy-name"
             maxLength={200}
-            onChange={(event) => setName(event.target.value)}
+            onChange={(event) => { setName(event.target.value); onDraftChange(); }}
             placeholder="e.g. SPY trend follow"
             required
             value={name}
@@ -61,9 +60,9 @@ export function StrategyCreateForm({ isSubmitting, onSubmit }: StrategyCreateFor
           </label>
           <textarea
             className="mt-2 min-h-32 w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm leading-6 outline-none transition focus:border-emerald-600 focus:ring-2 focus:ring-emerald-600/20 dark:border-zinc-700 dark:bg-zinc-950"
-            disabled={isSubmitting}
+            disabled={isPreviewing}
             id="strategy-source-text"
-            onChange={(event) => setSourceText(event.target.value)}
+            onChange={(event) => { setSourceText(event.target.value); onDraftChange(); }}
             placeholder="Describe the entry, exit, and risk rules in plain language."
             required
             value={sourceText}
@@ -73,15 +72,15 @@ export function StrategyCreateForm({ isSubmitting, onSubmit }: StrategyCreateFor
         <div className="flex flex-wrap gap-3">
           <button
             className="rounded-md bg-zinc-950 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-50 dark:text-zinc-950 dark:hover:bg-zinc-200"
-            disabled={isSubmitting}
+            disabled={isPreviewing}
             type="submit"
           >
-            {isSubmitting ? "Creating..." : "Create strategy"}
+            {isPreviewing ? "Parsing and backtesting..." : "Parse and Backtest"}
           </button>
           <button
             className="rounded-md px-4 py-2.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            disabled={isSubmitting || (!name && !sourceText)}
-            onClick={resetForm}
+            disabled={isPreviewing || (!name && !sourceText)}
+            onClick={() => { resetForm(); onDraftChange(); }}
             type="button"
           >
             Reset

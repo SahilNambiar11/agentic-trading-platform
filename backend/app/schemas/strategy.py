@@ -1,8 +1,16 @@
 from datetime import datetime
+from decimal import Decimal
 from typing import Annotated, Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, JsonValue, StringConstraints, model_validator
+
+from app.schemas.strategy_spec import (
+    AppliedDefault,
+    ParsedStrategyResult,
+    StrategyAssumption,
+    StrategySpecification,
+)
 
 StrategyName = Annotated[
     str,
@@ -60,3 +68,76 @@ class StrategyResponse(BaseModel):
     strategy_json: StrategyJson | None
     created_at: datetime
     updated_at: datetime
+
+
+class StrategyPreviewRequest(StrategyRequest):
+    text: StrategySourceText
+
+
+class ParsedStrategyReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    specification: StrategySpecification
+    defaults_applied: list[AppliedDefault]
+    assumptions: list[StrategyAssumption]
+    requires_confirmation: bool
+    original_text: str
+    interpretation: str
+
+    @classmethod
+    def from_parsed_result(
+        cls, result: ParsedStrategyResult, interpretation: str
+    ) -> "ParsedStrategyReview":
+        return cls(
+            specification=result.specification,
+            defaults_applied=result.defaults_applied,
+            assumptions=result.assumptions,
+            requires_confirmation=result.requires_confirmation,
+            original_text=result.original_text,
+            interpretation=interpretation,
+        )
+
+
+class BacktestPreviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str
+    interval: str
+    start_date: datetime
+    end_date: datetime
+    bar_count: int
+    starting_cash: Decimal
+    ending_value: Decimal
+    total_return_percent: Decimal
+    cagr_percent: Decimal | None
+    max_drawdown_percent: Decimal
+    trade_count: int
+    win_rate_percent: Decimal
+    buy_and_hold_return_percent: Decimal
+
+
+class StrategyPreviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    parsed_strategy: ParsedStrategyReview
+    backtest: BacktestPreviewResponse
+
+
+class ConfirmedStrategySaveRequest(StrategyRequest):
+    name: StrategyName
+    source_text: StrategySourceText
+    specification: StrategySpecification
+    defaults_applied: list[AppliedDefault]
+    assumptions: list[StrategyAssumption]
+    requires_confirmation: bool
+    confirmed: bool
+
+    @model_validator(mode="after")
+    def validate_confirmation_metadata(self) -> Self:
+        if not self.confirmed:
+            raise ValueError("Explicit confirmation is required before saving a strategy.")
+        if self.requires_confirmation != bool(self.assumptions):
+            raise ValueError("Confirmation metadata does not match the strategy assumptions.")
+        if any(not assumption.requires_confirmation for assumption in self.assumptions):
+            raise ValueError("All recorded assumptions must require confirmation.")
+        return self

@@ -3,8 +3,10 @@ import { createClient } from "@/lib/supabase/client";
 
 import type {
   CreateStrategyRequest,
+  ConfirmedStrategySaveRequest,
   Strategy,
   StrategyJson,
+  StrategyPreview,
   UpdateStrategyRequest,
 } from "./types";
 
@@ -168,4 +170,54 @@ export async function updateStrategy(
 export async function deleteStrategy(strategyId: string): Promise<void> {
   // Delete a saved strategy. A 204 response has no JSON body to parse.
   await request(`/strategies/${strategyId}`, { method: "DELETE" });
+}
+
+function isStrategyPreview(value: unknown): value is StrategyPreview {
+  if (!isStrategyJson(value) || !isStrategyJson(value.parsed_strategy) || !isStrategyJson(value.backtest)) {
+    return false;
+  }
+  const parsed = value.parsed_strategy;
+  const backtest = value.backtest;
+  return (
+    isStrategyJson(parsed.specification) &&
+    Array.isArray(parsed.defaults_applied) &&
+    Array.isArray(parsed.assumptions) &&
+    typeof parsed.requires_confirmation === "boolean" &&
+    typeof parsed.original_text === "string" &&
+    typeof parsed.interpretation === "string" &&
+    typeof backtest.symbol === "string" &&
+    typeof backtest.interval === "string" &&
+    typeof backtest.start_date === "string" &&
+    typeof backtest.end_date === "string" &&
+    typeof backtest.bar_count === "number" &&
+    typeof backtest.trade_count === "number"
+  );
+}
+
+export async function previewStrategy(text: string): Promise<StrategyPreview> {
+  const response = await request("/strategies/preview", {
+    body: JSON.stringify({ text }),
+    method: "POST",
+  });
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    throw new StrategyApiError("The strategy service returned an invalid preview.");
+  }
+  if (!isStrategyPreview(body)) {
+    throw new StrategyApiError("The strategy service returned an invalid preview.");
+  }
+  return body;
+}
+
+export async function saveConfirmedStrategy(
+  payload: ConfirmedStrategySaveRequest,
+): Promise<Strategy> {
+  return readStrategy(
+    await request("/strategies/confirmed", {
+      body: JSON.stringify(payload),
+      method: "POST",
+    }),
+  );
 }
