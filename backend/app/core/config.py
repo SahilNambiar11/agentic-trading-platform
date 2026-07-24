@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     supabase_anon_key: SecretStr
     supabase_auth_timeout_seconds: float = 5.0
     cors_origins: list[AnyHttpUrl]
+    openai_api_key: SecretStr | None = None
+    openai_model: str | None = None
 
 
 @lru_cache
