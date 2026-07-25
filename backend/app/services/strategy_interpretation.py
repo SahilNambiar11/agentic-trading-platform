@@ -14,6 +14,7 @@ def interpret_strategy(result: ParsedStrategyResult) -> str:
         "Interpreted strategy:",
         f"Buy {specification.symbol} when {format_condition(specification.entry)}.",
         f"Sell when {format_condition(specification.exit)}.",
+        f"Risk controls: {format_risk_controls(result)}",
         "",
         "Platform defaults applied:",
     ]
@@ -28,6 +29,18 @@ def interpret_strategy(result: ParsedStrategyResult) -> str:
 
     lines.extend(["", f"Confirmation required: {'Yes' if result.requires_confirmation else 'No'}"])
     return "\n".join(lines)
+
+
+def format_risk_controls(result: ParsedStrategyResult) -> str:
+    specification = result.specification
+    controls: list[str] = []
+    if specification.stop_loss_percent is not None:
+        controls.append(f"{specification.stop_loss_percent:g}% stop loss")
+    if specification.take_profit_percent is not None:
+        controls.append(f"{specification.take_profit_percent:g}% take profit")
+    if not controls:
+        return "None."
+    return f"Use {' and '.join(controls)} relative to the entry fill price."
 
 
 def format_condition(condition: Condition) -> str:

@@ -4,6 +4,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
+MAX_RISK_PERCENT = Decimal("50")
+
 
 class StrictSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -65,6 +67,18 @@ class StrategySpecification(StrictSchema):
     entry: Condition
     exit: Condition
     execution: ExecutionSettings
+    stop_loss_percent: Decimal | None = Field(
+        default=None,
+        gt=Decimal("0"),
+        le=MAX_RISK_PERCENT,
+        allow_inf_nan=False,
+    )
+    take_profit_percent: Decimal | None = Field(
+        default=None,
+        gt=Decimal("0"),
+        le=MAX_RISK_PERCENT,
+        allow_inf_nan=False,
+    )
 
 
 class OperandDraft(StrictSchema):

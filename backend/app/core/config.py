@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     cors_origins: list[AnyHttpUrl]
     openai_api_key: SecretStr | None = None
     openai_model: str | None = None
+    preview_job_ttl_hours: int = 24
+    preview_job_max_retries: int = 2
+    preview_queue_name: str = "preview"
 
 
 @lru_cache

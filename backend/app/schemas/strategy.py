@@ -1,6 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, JsonValue, StringConstraints, model_validator
@@ -114,6 +114,44 @@ class BacktestPreviewResponse(BaseModel):
     trade_count: int
     win_rate_percent: Decimal
     buy_and_hold_return_percent: Decimal
+    equity_curve: list["EquityComparisonPoint"]
+    price_series: list["PriceSeriesPoint"]
+    trades: list["BacktestTradeResponse"]
+
+
+class EquityComparisonPoint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    timestamp: datetime
+    strategy_value: Decimal
+    buy_and_hold_value: Decimal
+
+
+class PriceSeriesPoint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    timestamp: datetime
+    close_price: Decimal
+
+
+class BacktestTradeResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    signal_timestamp: datetime
+    entry_timestamp: datetime
+    entry_price: Decimal
+    quantity: int
+    exit_signal_timestamp: datetime | None
+    exit_timestamp: datetime
+    exit_price: Decimal
+    profit_loss: Decimal
+    return_percentage: Decimal
+    exit_reason: Literal[
+        "strategy_exit",
+        "stop_loss",
+        "take_profit",
+        "final_liquidation",
+    ]
 
 
 class StrategyPreviewResponse(BaseModel):

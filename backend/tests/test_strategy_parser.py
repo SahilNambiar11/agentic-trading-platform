@@ -179,6 +179,89 @@ def test_valid_ema_and_price_constant_conditions_normalize() -> None:
 
 
 @pytest.mark.parametrize(
+    ("text", "stop_loss", "take_profit"),
+    [
+        (
+            "Buy on the crossover and use a 2% stop loss.",
+            Decimal("2"),
+            None,
+        ),
+        (
+            "Buy on the crossover and take profit at 5%.",
+            None,
+            Decimal("5"),
+        ),
+        (
+            "Buy on the crossover with a 2% stop loss and take profit at 5%.",
+            Decimal("2"),
+            Decimal("5"),
+        ),
+        (
+            "Exit if the position loses 2% or gains 5%.",
+            Decimal("2"),
+            Decimal("5"),
+        ),
+    ],
+)
+def test_explicit_percentage_risk_controls_are_extracted_deterministically(
+    text: str,
+    stop_loss: Decimal | None,
+    take_profit: Decimal | None,
+) -> None:
+    result = normalize_strategy_draft(
+        StrategyParseDraft(
+            entry=crossover(Operator.CROSSES_ABOVE),
+            exit=crossover(Operator.CROSSES_BELOW),
+        ),
+        original_text=text,
+    )
+
+    assert result.specification.stop_loss_percent == stop_loss
+    assert result.specification.take_profit_percent == take_profit
+    assert all("stop_loss" not in item.field for item in result.assumptions)
+    assert all("take_profit" not in item.field for item in result.assumptions)
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        ("Use a 0% stop loss.", "greater than 0"),
+        ("Use a -2% stop loss.", "greater than 0"),
+        ("Take profit at 50.1%.", "no greater than 50"),
+        ("Use a 2% stop loss and a 3% stop loss.", "Conflicting stop-loss"),
+        ("Use a tight stop.", "Stop-loss must be an explicit"),
+        ("Take profit when appropriate.", "Take-profit must be an explicit"),
+    ],
+)
+def test_invalid_conflicting_or_vague_risk_controls_are_rejected(
+    text: str,
+    message: str,
+) -> None:
+    with pytest.raises(StrategyValidationError, match=message):
+        normalize_strategy_draft(
+            StrategyParseDraft(
+                entry=crossover(Operator.CROSSES_ABOVE),
+                exit=crossover(Operator.CROSSES_BELOW),
+            ),
+            original_text=text,
+        )
+
+
+def test_strategy_without_risk_controls_remains_null_and_interprets_none() -> None:
+    result = normalize_strategy_draft(
+        StrategyParseDraft(
+            entry=crossover(Operator.CROSSES_ABOVE),
+            exit=crossover(Operator.CROSSES_BELOW),
+        ),
+        original_text="Buy and sell on the explicit SMA crossovers.",
+    )
+
+    assert result.specification.stop_loss_percent is None
+    assert result.specification.take_profit_percent is None
+    assert "Risk controls: None." in interpret_strategy(result)
+
+
+@pytest.mark.parametrize(
     ("draft", "text", "message"),
     [
         (StrategyParseDraft(), "Buy when moving average rises.", "moving-average periods"),
@@ -213,7 +296,6 @@ def test_missing_or_invalid_periods_are_rejected(
     [
         ("Buy SPY when RSI is below 30.", "RSI"),
         ("Short SPY when the 50-day SMA crosses below the 200-day SMA.", "Short"),
-        ("Sell at a 5% stop loss.", "Stop losses"),
         ("Buy based on positive news sentiment.", "News-based"),
         ("Buy when momentum is strong.", "Momentum"),
     ],

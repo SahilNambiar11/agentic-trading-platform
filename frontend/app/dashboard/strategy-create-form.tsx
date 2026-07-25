@@ -34,7 +34,7 @@ export function StrategyCreateForm({ isPreviewing, onPreview, onDraftChange }: S
       <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">Strategy builder</p>
       <h2 className="mt-1 text-lg font-semibold">New Strategy</h2>
       <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-        Start with a clear trading idea. Parsing and backtesting come next.
+        Start with a clear trading idea. You can follow parsing and backtest progress here.
       </p>
 
       <form className="mt-5 space-y-4" onSubmit={(event) => void handleSubmit(event)}>
@@ -75,7 +75,7 @@ export function StrategyCreateForm({ isPreviewing, onPreview, onDraftChange }: S
             disabled={isPreviewing}
             type="submit"
           >
-            {isPreviewing ? "Parsing and backtesting..." : "Parse and Backtest"}
+            {isPreviewing ? "Preview in progress..." : "Parse and Backtest"}
           </button>
           <button
             className="rounded-md px-4 py-2.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60 dark:text-zinc-300 dark:hover:bg-zinc-800"

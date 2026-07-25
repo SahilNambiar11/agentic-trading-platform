@@ -19,6 +19,13 @@ class SignalType(StrEnum):
     SELL = "sell"
 
 
+class ExitReason(StrEnum):
+    STRATEGY_EXIT = "strategy_exit"
+    STOP_LOSS = "stop_loss"
+    TAKE_PROFIT = "take_profit"
+    FINAL_LIQUIDATION = "final_liquidation"
+
+
 @dataclass(frozen=True)
 class Signal:
     timestamp: datetime
@@ -36,7 +43,7 @@ class CompletedTrade:
     exit_price: Decimal
     profit_loss: Decimal
     return_percentage: Decimal
-    exit_reason: str
+    exit_reason: ExitReason
 
 
 @dataclass(frozen=True)

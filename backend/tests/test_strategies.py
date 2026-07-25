@@ -1,7 +1,6 @@
 from collections.abc import Generator
 from datetime import UTC, datetime
 from decimal import Decimal
-from types import SimpleNamespace
 from typing import Any, cast
 from uuid import UUID, uuid4
 
@@ -15,15 +14,23 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.schema import DefaultClause
 
 from app.api.dependencies.auth import get_current_user
-from app.api.routes import strategies as strategy_routes
-from app.api.routes.strategies import get_strategy_parser
-from app.backtesting.models import BacktestMetrics, ExecutionResult
+from app.backtesting.models import (
+    BacktestMetrics,
+    EquityPoint,
+    ExecutionResult,
+    MarketBar,
+)
 from app.db.session import get_db_session
 from app.main import app
+from app.models.preview_job import PreviewJob
 from app.models.strategy import Strategy
+from app.queue.connection import get_preview_queue
 from app.schemas.auth import AuthenticatedUser
 from app.schemas.strategy_spec import ParsedStrategyResult
+from app.services.job_store import claim_job, create_job, get_job
+from app.services.preview_job_service import run_preview_job, submit_preview_job
 from app.services.strategy_parser import StrategyProviderError
+from app.services.strategy_preview import StrategyPreview
 
 USER_ONE_ID = UUID("4b53cd47-e66e-47fb-b1a3-589dbf0eab76")
 USER_TWO_ID = UUID("6676e143-4796-4338-b42f-47f85e587e5f")
@@ -70,6 +77,33 @@ def db_session() -> Generator[Session]:
         )
         connection.exec_driver_sql(
             "CREATE INDEX public.strategies_user_id_idx ON strategies (user_id)"
+        )
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE public.preview_jobs (
+                id CHAR(32) PRIMARY KEY,
+                user_id CHAR(32) NOT NULL,
+                status TEXT NOT NULL,
+                stage TEXT NOT NULL,
+                progress INTEGER NOT NULL,
+                strategy_text TEXT NOT NULL,
+                strategy_name TEXT,
+                error_message TEXT,
+                preview_result JSON,
+                attempt_count INTEGER NOT NULL,
+                created_at DATETIME NOT NULL,
+                started_at DATETIME,
+                completed_at DATETIME,
+                expires_at DATETIME NOT NULL
+            )
+            """
+        )
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE public.backtest_runs (
+                id CHAR(32) PRIMARY KEY
+            )
+            """
         )
         connection.commit()
 
@@ -154,6 +188,7 @@ def test_strategy_model_matches_migration_metadata() -> None:
     ("method", "path", "body"),
     [
         ("POST", "/strategies", {"name": "Test", "source_text": "Buy SPY."}),
+        ("POST", "/strategies/preview", {"text": "Buy SPY."}),
         ("GET", "/strategies", None),
         ("GET", f"/strategies/{uuid4()}", None),
         ("PATCH", f"/strategies/{uuid4()}", {"name": "Updated"}),
@@ -382,8 +417,8 @@ def test_delete_returns_not_found_for_missing_strategy(client: TestClient) -> No
     assert response.status_code == 404
 
 
-def preview_result(*, assumptions: bool = False) -> ParsedStrategyResult:
-    result = ParsedStrategyResult.model_validate(
+def preview_result() -> ParsedStrategyResult:
+    return ParsedStrategyResult.model_validate(
         {
             "specification": {
                 "symbol": "SPY",
@@ -410,22 +445,6 @@ def preview_result(*, assumptions: bool = False) -> ParsedStrategyResult:
             "original_text": "Buy SPY.",
         }
     )
-    if not assumptions:
-        return result
-    return result.model_copy(
-        update={
-            "assumptions": [
-                {
-                    "field": "exit",
-                    "inferred_value": "x",
-                    "reason": "Inferred exit.",
-                    "confidence": "high",
-                    "requires_confirmation": True,
-                }
-            ],
-            "requires_confirmation": True,
-        }
-    )
 
 
 class MockParser:
@@ -439,11 +458,48 @@ class MockParser:
         return self.result
 
 
-def fake_preview() -> SimpleNamespace:
+class RecordingQueue:
+    def __init__(self) -> None:
+        self.payloads: list[dict[str, object]] = []
+
+    def enqueue(
+        self,
+        *,
+        job_id: UUID,
+        user_id: UUID,
+        strategy_text: str,
+        strategy_name: str | None,
+    ) -> None:
+        self.payloads.append(
+            {
+                "job_id": job_id,
+                "user_id": user_id,
+                "strategy_text": strategy_text,
+                "strategy_name": strategy_name,
+            }
+        )
+
+
+def fake_preview(parsed: ParsedStrategyResult) -> StrategyPreview:
     now = datetime(2024, 1, 1, tzinfo=UTC)
-    return SimpleNamespace(
+    bar = MarketBar(
+        timestamp=now,
+        open_price=Decimal("1"),
+        high_price=Decimal("1"),
+        low_price=Decimal("1"),
+        close_price=Decimal("1"),
+        volume=1,
+    )
+    return StrategyPreview(
+        parsed_strategy=parsed,
         interpretation="Interpreted strategy.",
-        execution=ExecutionResult(Decimal("10000"), Decimal("0"), [], [], []),
+        execution=ExecutionResult(
+            Decimal("10000"),
+            Decimal("0"),
+            [],
+            [EquityPoint(now, Decimal("10000"))],
+            [],
+        ),
         metrics=BacktestMetrics(
             Decimal("0"),
             Decimal("0"),
@@ -457,35 +513,182 @@ def fake_preview() -> SimpleNamespace:
         bar_count=1,
         start_timestamp=now,
         end_timestamp=now,
+        bars=[bar],
+        comparison_start_index=0,
+        buy_and_hold_equity_curve=[EquityPoint(now, Decimal("10000"))],
     )
 
 
-def test_preview_endpoint_is_authenticated_safe_and_non_persistent(
-    client: TestClient, db_session: Session, monkeypatch
+def test_preview_enqueue_endpoint_creates_exactly_one_job(
+    client: TestClient,
+    db_session: Session,
 ) -> None:
-    parser = MockParser(preview_result(assumptions=True))
-    app.dependency_overrides[get_strategy_parser] = lambda: parser
-    monkeypatch.setattr(strategy_routes, "create_preview", lambda session, parsed: fake_preview())
+    queue = RecordingQueue()
+    app.dependency_overrides[get_preview_queue] = lambda: queue
     try:
         response = client.post("/strategies/preview", json={"text": "Buy SPY."})
-        assert response.status_code == 200
-        assert response.json()["parsed_strategy"]["requires_confirmation"] is True
-        assert response.json()["backtest"]["ending_value"] == "10000"
+        jobs = list(db_session.scalars(select(PreviewJob)).all())
+
+        assert response.status_code == 202
+        assert response.json() == {"job_id": str(jobs[0].id), "status": "queued"}
+        assert len(jobs) == 1
+        assert len(queue.payloads) == 1
+        assert jobs[0].expires_at > jobs[0].created_at
         assert db_session.scalars(select(Strategy)).all() == []
-        assert "raw_provider_response" not in response.json()
     finally:
-        app.dependency_overrides.pop(get_strategy_parser, None)
+        app.dependency_overrides.pop(get_preview_queue, None)
 
 
-def test_preview_endpoint_maps_provider_failure_safely(client: TestClient) -> None:
-    app.dependency_overrides[get_strategy_parser] = lambda: MockParser(
-        StrategyProviderError("secret")
+def test_preview_queue_payload_is_minimal(db_session: Session) -> None:
+    queue = RecordingQueue()
+
+    job_id = submit_preview_job(
+        db_session,
+        queue,
+        user_id=USER_ONE_ID,
+        strategy_text="Buy SPY.",
+        strategy_name=None,
     )
-    try:
-        response = client.post("/strategies/preview", json={"text": "Buy SPY."})
-        assert response.status_code == 502 and "secret" not in response.json()["detail"]
-    finally:
-        app.dependency_overrides.pop(get_strategy_parser, None)
+
+    assert queue.payloads == [
+        {
+            "job_id": job_id,
+            "user_id": USER_ONE_ID,
+            "strategy_text": "Buy SPY.",
+            "strategy_name": None,
+        }
+    ]
+
+
+def test_worker_success_stores_completed_result_without_backtest_run(
+    db_session: Session,
+) -> None:
+    job = create_job(
+        db_session,
+        user_id=USER_ONE_ID,
+        strategy_text="Buy SPY.",
+        strategy_name=None,
+        ttl_hours=24,
+    )
+    parsed = preview_result()
+    parser = MockParser(parsed)
+
+    processed = run_preview_job(
+        db_session,
+        job_id=job.id,
+        parser=parser,
+        preview_factory=lambda session, result: fake_preview(result),
+    )
+    db_session.refresh(job)
+    backtest_run_count = (
+        db_session.connection()
+        .exec_driver_sql("SELECT count(*) FROM public.backtest_runs")
+        .scalar_one()
+    )
+
+    assert processed is True
+    assert parser.calls == 1
+    assert job.status == "completed"
+    assert job.stage == "completed"
+    assert job.progress == 100
+    assert job.attempt_count == 1
+    assert job.error_message is None
+    assert job.preview_result is not None
+    assert job.preview_result["backtest"]["ending_value"] == "10000"
+    assert job.preview_result["backtest"]["equity_curve"] == [
+        {
+            "timestamp": "2024-01-01T00:00:00+00:00",
+            "strategy_value": "10000",
+            "buy_and_hold_value": "10000",
+        }
+    ]
+    assert job.preview_result["backtest"]["price_series"] == [
+        {"timestamp": "2024-01-01T00:00:00+00:00", "close_price": "1"}
+    ]
+    assert job.preview_result["backtest"]["trades"] == []
+    assert backtest_run_count == 0
+
+
+def test_worker_failure_stores_sanitized_failed_state(db_session: Session) -> None:
+    job = create_job(
+        db_session,
+        user_id=USER_ONE_ID,
+        strategy_text="Buy SPY.",
+        strategy_name=None,
+        ttl_hours=24,
+    )
+
+    processed = run_preview_job(
+        db_session,
+        job_id=job.id,
+        parser=MockParser(StrategyProviderError("provider secret detail")),
+    )
+    db_session.refresh(job)
+
+    assert processed is True
+    assert job.status == "failed"
+    assert job.stage == "failed"
+    assert job.progress == 100
+    assert job.preview_result is None
+    assert job.error_message == "Unable to parse the strategy."
+    assert "secret" not in job.error_message
+
+
+def test_duplicate_job_claim_is_rejected(db_session: Session) -> None:
+    job = create_job(
+        db_session,
+        user_id=USER_ONE_ID,
+        strategy_text="Buy SPY.",
+        strategy_name=None,
+        ttl_hours=24,
+    )
+
+    first_claim = claim_job(db_session, job.id)
+    second_claim = claim_job(db_session, job.id)
+
+    assert first_claim is not None
+    assert first_claim.status == "running"
+    assert first_claim.attempt_count == 1
+    assert second_claim is None
+
+
+def test_job_owner_can_read_status(client: TestClient, db_session: Session) -> None:
+    job = create_job(
+        db_session,
+        user_id=USER_ONE_ID,
+        strategy_text="Buy SPY.",
+        strategy_name=None,
+        ttl_hours=24,
+    )
+    run_preview_job(
+        db_session,
+        job_id=job.id,
+        parser=MockParser(preview_result()),
+        preview_factory=lambda session, result: fake_preview(result),
+    )
+
+    response = client.get(f"/jobs/{job.id}")
+
+    assert response.status_code == 200
+    assert response.json()["id"] == str(job.id)
+    assert response.json()["status"] == "completed"
+    assert response.json()["preview_result"]["backtest"]["ending_value"] == "10000"
+
+
+def test_another_user_cannot_read_job(client: TestClient, db_session: Session) -> None:
+    job = create_job(
+        db_session,
+        user_id=USER_ONE_ID,
+        strategy_text="Buy SPY.",
+        strategy_name=None,
+        ttl_hours=24,
+    )
+    authenticate_as(USER_TWO_ID)
+
+    response = client.get(f"/jobs/{job.id}")
+
+    assert response.status_code == 404
+    assert get_job(db_session, job_id=job.id, user_id=USER_TWO_ID) is None
 
 
 def test_confirmed_endpoint_validates_and_persists_bounded_metadata(

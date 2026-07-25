@@ -6,16 +6,17 @@ import {
   deleteStrategy,
   listStrategies,
   StrategyApiError,
-  previewStrategy,
   saveConfirmedStrategy,
   updateStrategy,
 } from "@/lib/strategies/api";
-import type { Strategy, StrategyPreview, UpdateStrategyRequest } from "@/lib/strategies/types";
+import type { Strategy, UpdateStrategyRequest } from "@/lib/strategies/types";
 
 import { StrategyCreateForm } from "./strategy-create-form";
+import { StrategyJobProgress } from "./strategy-job-progress";
 import { StrategyListItem, type StrategyItemMode } from "./strategy-list-item";
 import { StrategyReview } from "./strategy-review";
 import { validateStrategyInput } from "./strategy-validation";
+import { usePreviewJob } from "./use-preview-job";
 
 type Notice = { tone: "error" | "success"; message: string } | null;
 type ActiveStrategyAction = { id: string; mode: Exclude<StrategyItemMode, null> } | null;
@@ -34,9 +35,7 @@ export function StrategyWorkspace() {
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [isPreviewing, setIsPreviewing] = useState(false);
   const [isSavingPreview, setIsSavingPreview] = useState(false);
-  const [preview, setPreview] = useState<StrategyPreview | null>(null);
   const [pendingName, setPendingName] = useState("");
   const [pendingSourceText, setPendingSourceText] = useState("");
   const [previewConfirmed, setPreviewConfirmed] = useState(false);
@@ -45,6 +44,15 @@ export function StrategyWorkspace() {
   const [activeAction, setActiveAction] = useState<ActiveStrategyAction>(null);
   const [editName, setEditName] = useState("");
   const [editSourceText, setEditSourceText] = useState("");
+  const {
+    job: previewJob,
+    preview,
+    error: previewError,
+    isSubmitting: isSubmittingPreview,
+    isActive: isPreviewing,
+    submit: submitPreview,
+    reset: resetPreview,
+  } = usePreviewJob();
 
   const loadStrategies = useCallback(async () => {
     // Reload the current user's strategy list from FastAPI.
@@ -107,33 +115,23 @@ export function StrategyWorkspace() {
   }
 
   async function handlePreview(name: string, sourceText: string): Promise<void> {
-    // Validate locally first for quick feedback, then persist through FastAPI.
-    // Returning true tells the child form it can clear its fields.
+    // Validate locally first for quick feedback, then enqueue through FastAPI.
     const result = validateStrategyInput(name, sourceText);
     if (!result.valid) {
       setNotice({ tone: "error", message: result.error });
       return;
     }
 
-    setIsPreviewing(true);
     setNotice(null);
-
-    try {
-      const nextPreview = await previewStrategy(result.value.sourceText);
-      setPendingName(result.value.name);
-      setPendingSourceText(result.value.sourceText);
-      setPreview(nextPreview);
-      setPreviewConfirmed(false);
-    } catch (error) {
-      setNotice({ tone: "error", message: getErrorMessage(error) });
-    } finally {
-      setIsPreviewing(false);
-    }
+    setPendingName(result.value.name);
+    setPendingSourceText(result.value.sourceText);
+    setPreviewConfirmed(false);
+    await submitPreview(result.value.sourceText);
   }
 
   function invalidatePreview() {
-    if (preview) {
-      setPreview(null);
+    if (preview || previewJob || previewError) {
+      resetPreview();
       setPreviewConfirmed(false);
     }
   }
@@ -152,7 +150,7 @@ export function StrategyWorkspace() {
         requires_confirmation: preview.parsed_strategy.requires_confirmation,
         confirmed: true,
       });
-      setPreview(null);
+      resetPreview();
       setPreviewConfirmed(false);
       await loadStrategies();
       setNotice({ tone: "success", message: "Confirmed strategy saved." });
@@ -220,15 +218,36 @@ export function StrategyWorkspace() {
 
   return (
     <>
-      <StrategyCreateForm isPreviewing={isPreviewing} onDraftChange={invalidatePreview} onPreview={handlePreview} />
+      <StrategyCreateForm
+        isPreviewing={isPreviewing}
+        onDraftChange={invalidatePreview}
+        onPreview={handlePreview}
+      />
+
+      <StrategyJobProgress
+        error={previewError}
+        isSubmitting={isSubmittingPreview}
+        job={previewJob}
+        onCancel={() => {
+          resetPreview();
+          setPreviewConfirmed(false);
+        }}
+        onRetry={() => void handlePreview(pendingName, pendingSourceText)}
+      />
 
       {preview && (
         <StrategyReview
           confirmed={previewConfirmed}
           isSaving={isSavingPreview}
-          onCancel={() => { setPreview(null); setPreviewConfirmed(false); }}
+          onCancel={() => {
+            resetPreview();
+            setPreviewConfirmed(false);
+          }}
           onConfirmationChange={setPreviewConfirmed}
-          onEditPrompt={() => { setPreview(null); setPreviewConfirmed(false); }}
+          onEditPrompt={() => {
+            resetPreview();
+            setPreviewConfirmed(false);
+          }}
           onSave={() => void handleSavePreview()}
           preview={preview}
         />

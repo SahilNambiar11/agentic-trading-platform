@@ -10,6 +10,36 @@ export type StrategyAssumption = {
 
 export type AppliedDefault = { field: string; value: unknown; reason: string };
 
+export type ExitReason =
+  | "strategy_exit"
+  | "stop_loss"
+  | "take_profit"
+  | "final_liquidation";
+
+export type EquityCurvePoint = {
+  timestamp: string;
+  strategy_value: string | number;
+  buy_and_hold_value: string | number;
+};
+
+export type PriceSeriesPoint = {
+  timestamp: string;
+  close_price: string | number;
+};
+
+export type BacktestTrade = {
+  signal_timestamp: string;
+  entry_timestamp: string;
+  entry_price: string | number;
+  quantity: number;
+  exit_signal_timestamp: string | null;
+  exit_timestamp: string;
+  exit_price: string | number;
+  profit_loss: string | number;
+  return_percentage: string | number;
+  exit_reason: ExitReason;
+};
+
 export type StrategyPreview = {
   parsed_strategy: {
     specification: StrategyJson;
@@ -33,7 +63,40 @@ export type StrategyPreview = {
     trade_count: number;
     win_rate_percent: string | number;
     buy_and_hold_return_percent: string | number;
+    equity_curve: EquityCurvePoint[];
+    price_series: PriceSeriesPoint[];
+    trades: BacktestTrade[];
   };
+};
+
+export type PreviewJobStatus = "queued" | "running" | "completed" | "failed";
+
+export type PreviewJobStage =
+  | "queued"
+  | "parsing"
+  | "validating"
+  | "compiling"
+  | "loading_data"
+  | "backtesting"
+  | "generating_results"
+  | "completed"
+  | "failed";
+
+export type PreviewEnqueueResponse = {
+  job_id: string;
+  status: "queued";
+};
+
+export type PreviewJob = {
+  id: string;
+  status: PreviewJobStatus;
+  stage: PreviewJobStage;
+  progress: number;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  error: string | null;
+  preview_result: StrategyPreview | null;
 };
 
 // Mirrors the backend StrategyResponse schema. Keeping this shape explicit

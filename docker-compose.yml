@@ -41,7 +41,7 @@ services:
   worker:
     build:
       context: ./backend
-    command: ["rq", "worker", "--url", "redis://redis:6379/0", "default"]
+    command: ["rq", "worker", "--url", "redis://redis:6379/0", "preview"]
     env_file:
       - ./backend/.env.docker
     environment:

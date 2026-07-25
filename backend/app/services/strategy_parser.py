@@ -24,6 +24,7 @@ from app.schemas.strategy_spec import (
 )
 from app.services.strategy_semantics import (
     StrategyValidationError,
+    extract_risk_controls,
     find_normalization_hint,
     validate_strategy_semantics,
     validate_strategy_text,
@@ -81,7 +82,9 @@ class OpenAIResponsesProvider:
                             "Do not write code, SQL, explanations, or market-data analysis. "
                             "Leave omitted fields null in the draft rather than inventing values. "
                             "Recognize only close price, SMA, EMA, numeric constants, and the "
-                            "supported comparison/crossover operators."
+                            "supported comparison/crossover operators. Percentage stop-loss and "
+                            "take-profit controls are handled separately by deterministic "
+                            "application code; do not encode them as entry or exit conditions."
                         ),
                     },
                     {"role": "user", "content": strategy_text},
@@ -242,6 +245,7 @@ def normalize_strategy_draft(
             "Specify an entry and exit rule, or use a supported crossover shorthand."
         )
 
+    risk_controls = extract_risk_controls(original_text)
     specification = StrategySpecification(
         symbol=symbol,
         interval=interval,
@@ -252,6 +256,8 @@ def normalize_strategy_draft(
             position_size_percent=position_size,
             signal_execution=signal_execution,
         ),
+        stop_loss_percent=risk_controls.stop_loss_percent,
+        take_profit_percent=risk_controls.take_profit_percent,
     )
     validate_strategy_semantics(specification)
     return ParsedStrategyResult(

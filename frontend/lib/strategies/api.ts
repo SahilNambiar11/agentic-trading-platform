@@ -4,6 +4,10 @@ import { createClient } from "@/lib/supabase/client";
 import type {
   CreateStrategyRequest,
   ConfirmedStrategySaveRequest,
+  PreviewEnqueueResponse,
+  PreviewJob,
+  PreviewJobStage,
+  PreviewJobStatus,
   Strategy,
   StrategyJson,
   StrategyPreview,
@@ -173,11 +177,47 @@ export async function deleteStrategy(strategyId: string): Promise<void> {
 }
 
 function isStrategyPreview(value: unknown): value is StrategyPreview {
-  if (!isStrategyJson(value) || !isStrategyJson(value.parsed_strategy) || !isStrategyJson(value.backtest)) {
+  if (
+    !isStrategyJson(value) ||
+    !isStrategyJson(value.parsed_strategy) ||
+    !isStrategyJson(value.backtest)
+  ) {
     return false;
   }
   const parsed = value.parsed_strategy;
   const backtest = value.backtest;
+  const numberLike = (item: unknown) =>
+    (typeof item === "number" && Number.isFinite(item)) ||
+    (typeof item === "string" && item.trim() !== "" && Number.isFinite(Number(item)));
+  const exitReasons = new Set([
+    "strategy_exit",
+    "stop_loss",
+    "take_profit",
+    "final_liquidation",
+  ]);
+  const isEquityPoint = (item: unknown) =>
+    isStrategyJson(item) &&
+    typeof item.timestamp === "string" &&
+    numberLike(item.strategy_value) &&
+    numberLike(item.buy_and_hold_value);
+  const isPricePoint = (item: unknown) =>
+    isStrategyJson(item) &&
+    typeof item.timestamp === "string" &&
+    numberLike(item.close_price);
+  const isTrade = (item: unknown) =>
+    isStrategyJson(item) &&
+    typeof item.signal_timestamp === "string" &&
+    typeof item.entry_timestamp === "string" &&
+    numberLike(item.entry_price) &&
+    Number.isInteger(item.quantity) &&
+    (item.exit_signal_timestamp === null ||
+      typeof item.exit_signal_timestamp === "string") &&
+    typeof item.exit_timestamp === "string" &&
+    numberLike(item.exit_price) &&
+    numberLike(item.profit_loss) &&
+    numberLike(item.return_percentage) &&
+    typeof item.exit_reason === "string" &&
+    exitReasons.has(item.exit_reason);
   return (
     isStrategyJson(parsed.specification) &&
     Array.isArray(parsed.defaults_applied) &&
@@ -190,23 +230,109 @@ function isStrategyPreview(value: unknown): value is StrategyPreview {
     typeof backtest.start_date === "string" &&
     typeof backtest.end_date === "string" &&
     typeof backtest.bar_count === "number" &&
-    typeof backtest.trade_count === "number"
+    typeof backtest.trade_count === "number" &&
+    Array.isArray(backtest.equity_curve) &&
+    backtest.equity_curve.every(isEquityPoint) &&
+    Array.isArray(backtest.price_series) &&
+    backtest.price_series.every(isPricePoint) &&
+    Array.isArray(backtest.trades) &&
+    backtest.trades.every(isTrade)
   );
 }
 
-export async function previewStrategy(text: string): Promise<StrategyPreview> {
+function isPreviewEnqueueResponse(value: unknown): value is PreviewEnqueueResponse {
+  return (
+    isStrategyJson(value) &&
+    typeof value.job_id === "string" &&
+    value.job_id.length > 0 &&
+    value.status === "queued"
+  );
+}
+
+const JOB_STATUSES = new Set<PreviewJobStatus>(["queued", "running", "completed", "failed"]);
+const JOB_STAGES = new Set<PreviewJobStage>([
+  "queued",
+  "parsing",
+  "validating",
+  "compiling",
+  "loading_data",
+  "backtesting",
+  "generating_results",
+  "completed",
+  "failed",
+]);
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function isPreviewJob(value: unknown): value is PreviewJob {
+  if (!isStrategyJson(value)) {
+    return false;
+  }
+
+  const status = value.status;
+  const previewResult = value.preview_result;
+  return (
+    typeof value.id === "string" &&
+    typeof status === "string" &&
+    JOB_STATUSES.has(status as PreviewJobStatus) &&
+    typeof value.stage === "string" &&
+    JOB_STAGES.has(value.stage as PreviewJobStage) &&
+    Number.isInteger(value.progress) &&
+    typeof value.progress === "number" &&
+    value.progress >= 0 &&
+    value.progress <= 100 &&
+    typeof value.created_at === "string" &&
+    isNullableString(value.started_at) &&
+    isNullableString(value.completed_at) &&
+    isNullableString(value.error) &&
+    (status === "completed"
+      ? isStrategyPreview(previewResult)
+      : previewResult === null)
+  );
+}
+
+async function readJson(response: Response, invalidMessage: string): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    throw new StrategyApiError(invalidMessage);
+  }
+}
+
+export async function enqueueStrategyPreview(
+  text: string,
+  signal?: AbortSignal,
+): Promise<PreviewEnqueueResponse> {
   const response = await request("/strategies/preview", {
     body: JSON.stringify({ text }),
     method: "POST",
+    signal,
   });
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    throw new StrategyApiError("The strategy service returned an invalid preview.");
+  const body = await readJson(
+    response,
+    "The strategy service returned an invalid preview job response.",
+  );
+  if (!isPreviewEnqueueResponse(body)) {
+    throw new StrategyApiError(
+      "The strategy service returned an invalid preview job response.",
+    );
   }
-  if (!isStrategyPreview(body)) {
-    throw new StrategyApiError("The strategy service returned an invalid preview.");
+  return body;
+}
+
+export async function getPreviewJob(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<PreviewJob> {
+  const response = await request(`/jobs/${encodeURIComponent(jobId)}`, { signal });
+  const body = await readJson(
+    response,
+    "The strategy service returned an invalid preview job.",
+  );
+  if (!isPreviewJob(body)) {
+    throw new StrategyApiError("The strategy service returned an invalid preview job.");
   }
   return body;
 }

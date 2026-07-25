@@ -20,12 +20,12 @@ def calculate_metrics(
         raise ValueError("buy_and_hold_start_index is outside the loaded data range")
 
     buy_and_hold_start_bar = bars[buy_and_hold_start_index]
-    buy_and_hold_quantity = int(starting_cash // buy_and_hold_start_bar.open_price)
-    buy_and_hold_final_value = (
-        starting_cash
-        - Decimal(buy_and_hold_quantity) * buy_and_hold_start_bar.open_price
-        + Decimal(buy_and_hold_quantity) * bars[-1].close_price
+    buy_and_hold_equity = calculate_buy_and_hold_equity_curve(
+        bars,
+        starting_cash=starting_cash,
+        start_index=buy_and_hold_start_index,
     )
+    buy_and_hold_final_value = buy_and_hold_equity[-1].equity
     winning_trades = sum(trade.profit_loss > 0 for trade in completed_trades)
     win_rate = (
         Decimal(winning_trades) / Decimal(len(completed_trades)) * Decimal("100")
@@ -50,6 +50,28 @@ def calculate_metrics(
             bars[-1].timestamp,
         ),
     )
+
+
+def calculate_buy_and_hold_equity_curve(
+    bars: Sequence[MarketBar],
+    *,
+    starting_cash: Decimal,
+    start_index: int,
+) -> list[EquityPoint]:
+    """Mark a whole-share benchmark to each close from the eligible entry bar."""
+
+    if not 0 <= start_index < len(bars):
+        raise ValueError("start_index is outside the loaded data range")
+    start_bar = bars[start_index]
+    quantity = int(starting_cash // start_bar.open_price)
+    remaining_cash = starting_cash - Decimal(quantity) * start_bar.open_price
+    return [
+        EquityPoint(
+            timestamp=bar.timestamp,
+            equity=remaining_cash + Decimal(quantity) * bar.close_price,
+        )
+        for bar in bars[start_index:]
+    ]
 
 
 def calculate_maximum_drawdown(equity_curve: Sequence[EquityPoint]) -> Decimal:

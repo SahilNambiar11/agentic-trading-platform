@@ -2,6 +2,9 @@
 
 import type { StrategyPreview } from "@/lib/strategies/types";
 
+import { EquityCurveChart } from "./equity-curve-chart";
+import { SpyTradeChart } from "./spy-trade-chart";
+
 type StrategyReviewProps = {
   preview: StrategyPreview;
   confirmed: boolean;
@@ -70,6 +73,29 @@ export function StrategyReview({
             <dt className="text-zinc-500">Buy-and-hold</dt><dd>{formatPercent(backtest.buy_and_hold_return_percent)}</dd>
           </dl>
           <p className="mt-4 text-xs leading-5 text-zinc-500">Historical backtest results are hypothetical and do not guarantee future performance.</p>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-2">
+        <div className="rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
+          <h3 className="font-semibold">Portfolio equity</h3>
+          <p className="mt-1 text-xs text-zinc-500">
+            Strategy and whole-share SPY buy-and-hold both start with the same capital
+            at the strategy&apos;s first eligible bar.
+          </p>
+          <div className="mt-4">
+            <EquityCurveChart points={backtest.equity_curve} />
+          </div>
+        </div>
+        <div className="rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
+          <h3 className="font-semibold">SPY price and trade fills</h3>
+          <p className="mt-1 text-xs text-zinc-500">
+            The line is SPY&apos;s close; markers use actual execution timestamps and
+            fill prices.
+          </p>
+          <div className="mt-4">
+            <SpyTradeChart prices={backtest.price_series} trades={backtest.trades} />
+          </div>
         </div>
       </div>
 

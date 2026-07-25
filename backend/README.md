@@ -57,8 +57,22 @@ docker compose up --build
 Run `./scripts/setup-local-supabase.sh` before starting Compose. Containers use
 the generated Docker-specific configuration to reach the same Supabase project
 through `host.docker.internal`.
-The worker listens to the `default` queue and remains idle until jobs are added
-in a future implementation.
+The worker listens to the `preview` queue and processes asynchronous strategy
+preview jobs.
+
+For host development, run Redis, then separate API and worker processes:
+
+```bash
+docker compose up redis
+uv run uvicorn app.main:app --reload
+uv run rq worker --url "$REDIS_URL" preview
+```
+
+Expired preview results can be removed with:
+
+```bash
+uv run python -m app.scripts.cleanup_preview_jobs
+```
 
 ## Configuration
 
