@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -6,9 +7,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
-from app.core.config import Settings, get_settings
+from app.core import operations
+from app.core.config import Environment, Settings, get_settings
 from app.core.logging import configure_logging
 from app.services.supabase_auth import SupabaseAuthClient
+
+logger = logging.getLogger(__name__)
 
 
 def create_lifespan(settings: Settings):
@@ -21,13 +25,54 @@ def create_lifespan(settings: Settings):
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncGenerator[None]:
-        async with httpx.AsyncClient(timeout=settings.supabase_auth_timeout_seconds) as http_client:
-            application.state.supabase_auth_client = SupabaseAuthClient(
-                http_client=http_client,
-                supabase_url=str(settings.supabase_url),
-                api_key=settings.supabase_anon_key.get_secret_value(),
+        logger.info(
+            "API startup validation started",
+            extra={
+                "event": "startup",
+                "component": "api",
+                "outcome": "started",
+            },
+        )
+        try:
+            if settings.environment != Environment.TEST:
+                operations.validate_dependencies()
+            async with httpx.AsyncClient(
+                timeout=settings.supabase_auth_timeout_seconds
+            ) as http_client:
+                application.state.supabase_auth_client = SupabaseAuthClient(
+                    http_client=http_client,
+                    supabase_url=str(settings.supabase_url),
+                    api_key=settings.supabase_anon_key.get_secret_value(),
+                )
+                logger.info(
+                    "API startup validation completed",
+                    extra={
+                        "event": "startup",
+                        "component": "api",
+                        "outcome": "ready",
+                    },
+                )
+                yield
+        except Exception:
+            logger.exception(
+                "API startup failed",
+                extra={
+                    "event": "startup",
+                    "component": "api",
+                    "outcome": "failed",
+                },
             )
-            yield
+            raise
+        finally:
+            operations.dispose_resources()
+            logger.info(
+                "API shutdown completed",
+                extra={
+                    "event": "shutdown",
+                    "component": "api",
+                    "outcome": "success",
+                },
+            )
 
     return lifespan
 

@@ -4,6 +4,23 @@ from datetime import UTC, datetime
 from typing import Literal
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+OPERATIONAL_FIELDS = (
+    "event",
+    "component",
+    "job_id",
+    "queue",
+    "previous_status",
+    "new_status",
+    "reconciliation_action",
+    "attempt",
+    "max_attempts",
+    "duration_ms",
+    "dependency",
+    "outcome",
+    "reconciliation_scanned",
+    "reconciliation_recovered",
+    "reconciliation_failed",
+)
 
 
 class JsonFormatter(logging.Formatter):
@@ -19,6 +36,9 @@ class JsonFormatter(logging.Formatter):
         }
         if record.exc_info is not None:
             payload["exception"] = self.formatException(record.exc_info)
+        for field_name in OPERATIONAL_FIELDS:
+            if hasattr(record, field_name):
+                payload[field_name] = getattr(record, field_name)
         return json.dumps(payload, ensure_ascii=True)
 
 

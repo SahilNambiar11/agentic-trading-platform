@@ -1,37 +1,43 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Frontend
+
+Next.js App Router frontend for Supabase authentication, strategy management,
+preview progress, and backtest charts.
 
 ## Local development
 
-From the repository root, prepare the shared local Supabase project and local
-configuration:
+Copy `.env.example` to `.env.local`, replace all placeholders, then run:
 
 ```bash
-./scripts/setup-local-supabase.sh
-```
-
-Then run the development server from `frontend/`:
-
-```bash
+npm ci
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Required public variables:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `NEXT_PUBLIC_SUPABASE_URL`: hosted Supabase project URL.
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`: matching public anonymous key.
+- `NEXT_PUBLIC_API_BASE_URL`: browser-accessible FastAPI URL.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+All `NEXT_PUBLIC_*` variables are intentionally public and are frozen into
+browser JavaScript during `next build`. Changing a Kubernetes ConfigMap or
+container environment after the image is built cannot change these client
+values. Rebuild the frontend image for each environment or public endpoint.
 
-## Learn More
+The API URL must be reachable by the user's browser. A Compose or Kubernetes
+service name such as `http://backend:8000` is not valid for browser code.
 
-To learn more about Next.js, take a look at the following resources:
+## Production image
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The Dockerfile uses Next.js standalone output:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+docker build \
+  --build-arg NEXT_PUBLIC_API_BASE_URL=https://api.example.com \
+  --build-arg NEXT_PUBLIC_SUPABASE_URL=https://PROJECT_REF.supabase.co \
+  --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY=PUBLIC_ANON_VALUE \
+  --tag agentic-trading-frontend:0.1.0 \
+  .
+```
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The runtime image contains only the standalone server, static assets, and
+public files. It runs as UID/GID 10001 and listens on port 3000.

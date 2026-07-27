@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Table, create_engine, select, update
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.schema import DefaultClause
@@ -27,10 +28,25 @@ from app.models.strategy import Strategy
 from app.queue.connection import get_preview_queue
 from app.schemas.auth import AuthenticatedUser
 from app.schemas.strategy_spec import ParsedStrategyResult
-from app.services.job_store import claim_job, create_job, get_job
-from app.services.preview_job_service import run_preview_job, submit_preview_job
-from app.services.strategy_parser import StrategyProviderError
+from app.services.job_store import (
+    claim_job,
+    create_job,
+    get_job,
+    transition_job_after_operational_failure,
+)
+from app.services.preview_job_service import (
+    TransientPreviewJobError,
+    run_preview_job,
+    submit_preview_job,
+)
+from app.services.strategy_parser import (
+    StrategyMalformedOutputError,
+    StrategyProviderError,
+    StrategyProviderRefusalError,
+    StrategyProviderTimeoutError,
+)
 from app.services.strategy_preview import StrategyPreview
+from app.services.strategy_semantics import StrategyValidationError
 
 USER_ONE_ID = UUID("4b53cd47-e66e-47fb-b1a3-589dbf0eab76")
 USER_TWO_ID = UUID("6676e143-4796-4338-b42f-47f85e587e5f")
@@ -469,7 +485,9 @@ class RecordingQueue:
         user_id: UUID,
         strategy_text: str,
         strategy_name: str | None,
+        retry_count: int | None = None,
     ) -> None:
+        del retry_count
         self.payloads.append(
             {
                 "job_id": job_id,
@@ -632,6 +650,157 @@ def test_worker_failure_stores_sanitized_failed_state(db_session: Session) -> No
     assert job.preview_result is None
     assert job.error_message == "Unable to parse the strategy."
     assert "secret" not in job.error_message
+
+
+def test_provider_timeout_returns_job_to_queue_then_fails_after_final_attempt(
+    db_session: Session,
+) -> None:
+    job = create_job(
+        db_session,
+        user_id=USER_ONE_ID,
+        strategy_text="Buy SPY.",
+        strategy_name=None,
+        ttl_hours=24,
+    )
+
+    with pytest.raises(TransientPreviewJobError):
+        run_preview_job(
+            db_session,
+            job_id=job.id,
+            parser=MockParser(StrategyProviderTimeoutError("provider timeout detail")),
+        )
+
+    db_session.refresh(job)
+    assert job.status == "running"
+    assert job.attempt_count == 1
+    assert job.error_message is None
+
+    changed = transition_job_after_operational_failure(
+        db_session,
+        job_id=job.id,
+        will_retry=True,
+    )
+    db_session.refresh(job)
+    assert changed is True
+    assert job.status == "queued"
+    assert job.stage == "queued"
+    assert job.progress == 5
+    assert job.started_at is None
+    assert job.completed_at is None
+    assert job.error_message is None
+
+    claimed = claim_job(db_session, job.id)
+    assert claimed is not None
+    assert claimed.attempt_count == 2
+
+    changed = transition_job_after_operational_failure(
+        db_session,
+        job_id=job.id,
+        will_retry=False,
+    )
+    db_session.refresh(job)
+    assert changed is True
+    assert job.status == "failed"
+    assert job.stage == "failed"
+    assert job.progress == 100
+    assert job.completed_at is not None
+    assert job.error_message == "Unable to complete the strategy preview."
+    assert "provider" not in job.error_message
+
+
+def test_unexpected_nonoperational_error_fails_without_retry(db_session: Session) -> None:
+    job = create_job(
+        db_session,
+        user_id=USER_ONE_ID,
+        strategy_text="Buy SPY.",
+        strategy_name=None,
+        ttl_hours=24,
+    )
+
+    processed = run_preview_job(
+        db_session,
+        job_id=job.id,
+        parser=MockParser(ValueError("internal implementation detail")),
+    )
+
+    db_session.refresh(job)
+    assert processed is True
+    assert job.status == "failed"
+    assert job.attempt_count == 1
+    assert job.error_message == "Unable to complete the strategy preview."
+    assert "implementation" not in job.error_message
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        StrategyValidationError("unsupported or malformed strategy"),
+        StrategyProviderRefusalError("provider rejection detail"),
+        StrategyMalformedOutputError("malformed provider output"),
+    ],
+)
+def test_deterministic_parser_errors_fail_without_retry(
+    db_session: Session,
+    error: Exception,
+) -> None:
+    job = create_job(
+        db_session,
+        user_id=USER_ONE_ID,
+        strategy_text="Buy SPY.",
+        strategy_name=None,
+        ttl_hours=24,
+    )
+
+    processed = run_preview_job(
+        db_session,
+        job_id=job.id,
+        parser=MockParser(error),
+    )
+
+    db_session.refresh(job)
+    assert processed is True
+    assert job.status == "failed"
+    assert job.attempt_count == 1
+
+
+def test_database_operational_error_is_retryable(db_session: Session) -> None:
+    job = create_job(
+        db_session,
+        user_id=USER_ONE_ID,
+        strategy_text="Buy SPY.",
+        strategy_name=None,
+        ttl_hours=24,
+    )
+    database_error = OperationalError("SELECT 1", {}, ConnectionError("temporarily unavailable"))
+
+    with pytest.raises(TransientPreviewJobError):
+        run_preview_job(
+            db_session,
+            job_id=job.id,
+            parser=MockParser(database_error),
+        )
+
+    db_session.refresh(job)
+    assert job.status == "running"
+    assert job.attempt_count == 1
+    assert job.error_message is None
+
+
+def test_retry_attempt_can_reclaim_running_job(db_session: Session) -> None:
+    job = create_job(
+        db_session,
+        user_id=USER_ONE_ID,
+        strategy_text="Buy SPY.",
+        strategy_name=None,
+        ttl_hours=24,
+    )
+    assert claim_job(db_session, job.id) is not None
+
+    reclaimed = claim_job(db_session, job.id, allow_running_retry=True)
+
+    assert reclaimed is not None
+    assert reclaimed.status == "running"
+    assert reclaimed.attempt_count == 2
 
 
 def test_duplicate_job_claim_is_rejected(db_session: Session) -> None:

@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: agentic-trading
+  labels:
+    app.kubernetes.io/name: worker
+    app.kubernetes.io/component: preview-worker
+    app.kubernetes.io/part-of: agentic-trading-platform
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: worker
+      app.kubernetes.io/component: preview-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: worker
+        app.kubernetes.io/component: preview-worker
+        app.kubernetes.io/part-of: agentic-trading-platform
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: ghcr.io/your-org/agentic-trading-worker:0.1.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -m
+            - app.workers.run_preview_worker
+          envFrom:
+            - configMapRef:
+                name: agentic-trading-backend-config
+            - secretRef:
+                name: agentic-trading-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+          startupProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - from app.queue.connection import get_redis_connection; assert get_redis_connection().ping()
+            failureThreshold: 30
+            periodSeconds: 2
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - from app.queue.connection import get_redis_connection; assert get_redis_connection().ping()
+            failureThreshold: 3
+            periodSeconds: 15
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - from app.core.operations import validate_dependencies; validate_dependencies()
+            failureThreshold: 3
+            periodSeconds: 15
+            timeoutSeconds: 10
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

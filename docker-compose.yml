@@ -1,28 +1,58 @@
+name: agentic-trading-platform
+
+x-backend-environment: &backend-environment
+  APP_NAME: ${APP_NAME:-Agentic Trading Platform API}
+  ENVIRONMENT: production
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  REDIS_URL: redis://redis:6379/0
+
+x-backend-service: &backend-service
+  env_file:
+    - ${BACKEND_ENV_FILE:-./backend/.env.docker}
+  environment: *backend-environment
+  init: true
+  read_only: true
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  stop_grace_period: 30s
+  tmpfs:
+    - /tmp:uid=10001,gid=10001,mode=1770
+
 services:
   redis:
-    image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes"]
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
+    image: redis:7.4-alpine
+    user: "999:1000"
+    read_only: true
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    tmpfs:
+      - /tmp:uid=999,gid=1000,mode=1770
     volumes:
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
-      timeout: 5s
+      timeout: 3s
       retries: 10
+      start_period: 5s
 
   backend:
+    <<: *backend-service
+    image: agentic-trading-backend:${IMAGE_TAG:-local}
     build:
       context: ./backend
-    env_file:
-      - ./backend/.env.docker
-    environment:
-      REDIS_URL: redis://redis:6379/0
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      target: api
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     depends_on:
       redis:
         condition: service_healthy
@@ -32,25 +62,76 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)",
         ]
-      interval: 5s
+      interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 6
+      start_period: 20s
 
   worker:
+    <<: *backend-service
+    image: agentic-trading-worker:${IMAGE_TAG:-local}
     build:
       context: ./backend
-    command: ["rq", "worker", "--url", "redis://redis:6379/0", "preview"]
-    env_file:
-      - ./backend/.env.docker
-    environment:
-      REDIS_URL: redis://redis:6379/0
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      target: worker
     depends_on:
       redis:
         condition: service_healthy
+      backend:
+        condition: service_healthy
+    stop_grace_period: 60s
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "from app.queue.connection import get_redis_connection; assert get_redis_connection().ping()",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 30s
+
+  frontend:
+    image: agentic-trading-frontend:${IMAGE_TAG:-local}
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-}
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
+    environment:
+      HOSTNAME: 0.0.0.0
+      NODE_ENV: production
+      PORT: "3000"
+    init: true
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    tmpfs:
+      - /tmp:uid=10001,gid=10001,mode=1770
+      - /app/.next/cache:uid=10001,gid=10001,mode=0750
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "const net=require('node:net');const socket=net.connect(3000,'127.0.0.1');socket.setTimeout(3000);socket.on('connect',()=>{socket.end();process.exit(0)});socket.on('timeout',()=>process.exit(1));socket.on('error',()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
 
 volumes:
   redis_data:
